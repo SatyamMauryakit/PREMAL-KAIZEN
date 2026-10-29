@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "microservices-architect": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/microservices-architect/SKILL.md",
+      "computedHash": "c388eade4d1f6a21f722be217b11cd3dea6a81ed3c7545ad62f4e97100b14e24"
+    }
+  }
+}

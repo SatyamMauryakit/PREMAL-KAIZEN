@@ -1,0 +1,151 @@
+'use client';
+
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+
+export interface ShippingAddress {
+  firstName: string;
+  lastName: string;
+  phoneNumber: string;
+  street1: string;
+  street2?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+}
+
+export interface CheckoutStep {
+  step: 'cart' | 'information' | 'shipping' | 'payment' | 'review';
+  isCompleted: boolean;
+}
+
+interface CheckoutContextType {
+  currentStep: 'cart' | 'information' | 'shipping' | 'payment' | 'review';
+  shippingAddress: ShippingAddress | null;
+  billingAddress: ShippingAddress | null;
+  sameAsBilling: boolean;
+  shippingMethod: 'standard' | 'express' | 'overnight' | null;
+  paymentMethod: 'card' | 'upi' | 'netbanking' | 'cod' | null;
+  orderNotes: string;
+  isLoading: boolean;
+  error: string | null;
+
+  // Actions
+  goToStep: (step: 'cart' | 'information' | 'shipping' | 'payment' | 'review') => void;
+  updateShippingAddress: (address: ShippingAddress) => void;
+  updateBillingAddress: (address: ShippingAddress) => void;
+  setSameAsBilling: (same: boolean) => void;
+  setShippingMethod: (method: 'standard' | 'express' | 'overnight') => void;
+  setPaymentMethod: (method: 'card' | 'upi' | 'netbanking' | 'cod') => void;
+  setOrderNotes: (notes: string) => void;
+  setError: (error: string | null) => void;
+  resetCheckout: () => void;
+}
+
+const CheckoutContext = createContext<CheckoutContextType | undefined>(undefined);
+
+const initialAddress: ShippingAddress = {
+  firstName: '',
+  lastName: '',
+  phoneNumber: '',
+  street1: '',
+  street2: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'India',
+};
+
+export function CheckoutProvider({ children }: { children: ReactNode }) {
+  const [currentStep, setCurrentStep] = useState<'cart' | 'information' | 'shipping' | 'payment' | 'review'>('cart');
+  const [shippingAddress, setShippingAddress] = useState<ShippingAddress | null>(null);
+  const [billingAddress, setBillingAddress] = useState<ShippingAddress | null>(null);
+  const [sameAsBilling, setSameAsShippingBilling] = useState(true);
+  const [shippingMethod, setShippingMethodState] = useState<'standard' | 'express' | 'overnight' | null>('standard');
+  const [paymentMethod, setPaymentMethodState] = useState<'card' | 'upi' | 'netbanking' | 'cod' | null>(null);
+  const [orderNotes, setOrderNotesState] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setErrorState] = useState<string | null>(null);
+
+  const goToStep = (step: 'cart' | 'information' | 'shipping' | 'payment' | 'review') => {
+    setCurrentStep(step);
+    setErrorState(null);
+  };
+
+  const updateShippingAddress = (address: ShippingAddress) => {
+    setShippingAddress(address);
+  };
+
+  const updateBillingAddress = (address: ShippingAddress) => {
+    setBillingAddress(address);
+  };
+
+  const setSameAsBilling = (same: boolean) => {
+    setSameAsShippingBilling(same);
+    if (same && shippingAddress) {
+      setBillingAddress(shippingAddress);
+    }
+  };
+
+  const setShippingMethod = (method: 'standard' | 'express' | 'overnight') => {
+    setShippingMethodState(method);
+  };
+
+  const setPaymentMethod = (method: 'card' | 'upi' | 'netbanking' | 'cod') => {
+    setPaymentMethodState(method);
+  };
+
+  const setOrderNotes = (notes: string) => {
+    setOrderNotesState(notes);
+  };
+
+  const setError = (err: string | null) => {
+    setErrorState(err);
+  };
+
+  const resetCheckout = () => {
+    setCurrentStep('cart');
+    setShippingAddress(null);
+    setBillingAddress(null);
+    setSameAsShippingBilling(true);
+    setShippingMethodState('standard');
+    setPaymentMethodState(null);
+    setOrderNotesState('');
+    setErrorState(null);
+  };
+
+  const value: CheckoutContextType = {
+    currentStep,
+    shippingAddress,
+    billingAddress,
+    sameAsBilling,
+    shippingMethod,
+    paymentMethod,
+    orderNotes,
+    isLoading,
+    error,
+    goToStep,
+    updateShippingAddress,
+    updateBillingAddress,
+    setSameAsBilling,
+    setShippingMethod,
+    setPaymentMethod,
+    setOrderNotes,
+    setError,
+    resetCheckout,
+  };
+
+  return (
+    <CheckoutContext.Provider value={value}>
+      {children}
+    </CheckoutContext.Provider>
+  );
+}
+
+export function useCheckout() {
+  const context = useContext(CheckoutContext);
+  if (context === undefined) {
+    throw new Error('useCheckout must be used within CheckoutProvider');
+  }
+  return context;
+}

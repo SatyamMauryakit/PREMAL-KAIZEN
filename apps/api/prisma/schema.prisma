@@ -1,0 +1,253 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & CUSTOMERS
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  password      String    // Hashed password
+
+  // Customer profile
+  firstName     String?
+  lastName      String?
+  phoneNumber   String?
+
+  // Account status
+  isActive      Boolean   @default(true)
+  lastLogin     DateTime?
+
+  // Relations
+  addresses     Address[]
+  orders        Order[]
+  wishlist      WishlistItem[]
+  sessions      Session[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([emailVerified])
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String
+  token         String    @unique
+  expiresAt     DateTime
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model VerificationToken {
+  id        String    @id @default(cuid())
+  email     String
+  token     String    @unique
+  type      String    // 'email_verification' or 'password_reset'
+  expiresAt DateTime
+
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model Address {
+  id          String    @id @default(cuid())
+  userId      String
+
+  // Address details
+  label       String    // 'Home', 'Office', etc.
+  firstName   String
+  lastName    String
+  phoneNumber String
+  street1     String    // Street address
+  street2     String?   // Apartment, suite, etc.
+  city        String
+  state       String    // State or province
+  postalCode  String
+  country     String
+
+  // Default address for delivery
+  isDefault   Boolean   @default(false)
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([isDefault])
+}
+
+// ============================================================================
+// PRODUCTS & CATALOG (reusable across all services)
+// ============================================================================
+
+model Product {
+  id          String    @id @default(cuid())
+  name        String
+  description String
+  sku         String    @unique
+
+  // Pricing
+  price       Int       // in paise (1 INR = 100 paise)
+  originalPrice Int?
+
+  // Media
+  images      ProductImage[]
+
+  // Categorization
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  // Availability
+  isActive    Boolean   @default(true)
+
+  // Variants
+  colors      String[]  @default([])
+  sizes       String[]  @default([])
+
+  // Wishlist items
+  wishlistItems WishlistItem[]
+
+  // Cart items
+  cartItems   CartItem[]
+
+  // Order items
+  orderItems  OrderItem[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([sku])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  products  Product[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model ProductImage {
+  id        String    @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  order     Int       @default(0)
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// ============================================================================
+// CART & WISHLIST
+// ============================================================================
+
+model CartItem {
+  id          String    @id @default(cuid())
+  userId      String?   // Null for guest cart (session-based)
+  productId   String
+  quantity    Int       @default(1)
+  selectedSize String?
+  selectedColor String?
+
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([productId])
+}
+
+model WishlistItem {
+  id        String    @id @default(cuid())
+  userId    String
+  productId String
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
+}
+
+// ============================================================================
+// ORDERS
+// ============================================================================
+
+model Order {
+  id            String    @id @default(cuid())
+  userId        String
+
+  // Order status
+  status        String    @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
+
+  // Pricing
+  subtotal      Int       // in paise
+  shipping      Int       @default(0)
+  tax           Int       @default(0)
+  total         Int
+
+  // Delivery
+  addressId     String?
+  trackingNumber String?
+  estimatedDelivery DateTime?
+
+  // Order items
+  items         OrderItem[]
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String    @id @default(cuid())
+  orderId   String
+  productId String
+
+  quantity  Int
+  price     Int       // Price at time of order (in paise)
+  selectedSize String?
+  selectedColor String?
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+}

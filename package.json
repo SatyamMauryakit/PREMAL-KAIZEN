@@ -1,0 +1,29 @@
+{
+  "name": "premal-kaizen",
+  "version": "0.1.0",
+  "description": "PREMAL KAIZEN - Premium Streetwear E-Commerce Platform",
+  "private": true,
+  "packageManager": "pnpm@12.4.2",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "type-check": "pnpm -r run type-check",
+    "test": "pnpm -r run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^16.4.3",
+    "prettier": "^3.2.4",
+    "typescript": "^5.3.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "typescript": "^5.3.3"
+    }
+  }
+}
