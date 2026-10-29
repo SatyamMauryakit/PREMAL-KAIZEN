@@ -2,16 +2,61 @@
 
 import { Header } from '@/components/Header';
 import Link from 'next/link';
-
-const products = [
-  { id: '1', name: 'Essential Heavy Hoodie', sku: 'EHH-001', price: '₹12,800', stock: 45, status: 'Active' },
-  { id: '2', name: 'Tactical Cargo Pants', sku: 'TCP-001', price: '₹15,200', stock: 32, status: 'Active' },
-  { id: '3', name: 'Premal Logo Tee', sku: 'PLT-001', price: '₹6,500', stock: 128, status: 'Active' },
-  { id: '4', name: 'Quilted Bomber Jacket', sku: 'QBJ-001', price: '₹24,500', stock: 12, status: 'Low Stock' },
-  { id: '5', name: 'Wool Knit Beanie', sku: 'WKB-001', price: '₹3,800', stock: 0, status: 'Out of Stock' },
-];
+import { useState, useEffect } from 'react';
+import { adminProductsService, ProductResponse } from '@/lib/products-service';
 
 export default function ProductsPage() {
+  const [products, setProducts] = useState<ProductResponse[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadProducts();
+  }, [page, search]);
+
+  const loadProducts = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
+      if (!token) throw new Error('Not authenticated');
+
+      const result = await adminProductsService.getProducts(token, page, 20, search);
+      setProducts(result.data);
+      setTotal(result.total);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load products');
+      setProducts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this product?')) return;
+
+    setDeleting(id);
+    try {
+      const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
+      if (!token) throw new Error('Not authenticated');
+
+      await adminProductsService.deleteProduct(id, token);
+      setProducts(products.filter(p => p.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete product');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const formatPrice = (price: number) => {
+    return `₹${(price / 100).toLocaleString('en-IN', { minimumFractionDigits: 0 })}`;
+  };
+
   return (
     <div className="min-h-screen bg-gray-light">
       <Header
@@ -20,6 +65,12 @@ export default function ProductsPage() {
       />
 
       <div className="p-6">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+            {error}
+          </div>
+        )}
+
         <div className="bg-white rounded-lg border border-gray-light">
           {/* Actions */}
           <div className="p-6 border-b border-gray-light flex justify-between items-center">
@@ -27,14 +78,13 @@ export default function ProductsPage() {
               <input
                 type="text"
                 placeholder="Search products..."
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
                 className="px-4 py-2 border border-gray-light rounded text-sm focus:outline-none focus:border-black"
               />
-              <select className="px-4 py-2 border border-gray-light rounded text-sm focus:outline-none focus:border-black">
-                <option>All Categories</option>
-                <option>Hoodies</option>
-                <option>T-Shirts</option>
-                <option>Pants</option>
-              </select>
             </div>
             <Link
               href="/admin/products/create"
@@ -45,74 +95,86 @@ export default function ProductsPage() {
           </div>
 
           {/* Products Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-light bg-gray-light">
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">SKU</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Price</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Stock</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => (
-                  <tr key={product.id} className="border-b border-gray-light hover:bg-gray-light">
-                    <td className="px-6 py-4 text-sm font-medium text-black">{product.name}</td>
-                    <td className="px-6 py-4 text-sm text-gray-dark">{product.sku}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-black">{product.price}</td>
-                    <td className="px-6 py-4 text-sm text-black font-medium">{product.stock}</td>
-                    <td className="px-6 py-4 text-sm">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          product.status === 'Active'
-                            ? 'bg-green-100 text-green-700'
-                            : product.status === 'Low Stock'
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {product.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm space-x-2">
-                      <button className="text-black hover:text-gray-dark font-medium">Edit</button>
-                      <span className="text-gray-light">|</span>
-                      <button className="text-black hover:text-gray-dark font-medium">Delete</button>
-                    </td>
+          {isLoading ? (
+            <div className="p-6 text-center text-gray-medium">Loading products...</div>
+          ) : products.length === 0 ? (
+            <div className="p-6 text-center text-gray-medium">
+              No products found. <Link href="/admin/products/create" className="text-black font-medium">Create one</Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-light bg-gray-light">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">SKU</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Price</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {products.map((product) => (
+                    <tr key={product.id} className="border-b border-gray-light hover:bg-gray-light">
+                      <td className="px-6 py-4 text-sm font-medium text-black">{product.name}</td>
+                      <td className="px-6 py-4 text-sm text-gray-dark">{product.sku}</td>
+                      <td className="px-6 py-4 text-sm font-medium text-black">{formatPrice(product.price)}</td>
+                      <td className="px-6 py-4 text-sm">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            product.isActive
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {product.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm space-x-2">
+                        <Link href={`/admin/products/${product.id}`} className="text-black hover:text-gray-dark font-medium">
+                          Edit
+                        </Link>
+                        <span className="text-gray-light">|</span>
+                        <button
+                          onClick={() => handleDelete(product.id)}
+                          disabled={deleting === product.id}
+                          className="text-black hover:text-gray-dark font-medium disabled:opacity-50"
+                        >
+                          {deleting === product.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Pagination */}
-          <div className="p-6 border-t border-gray-light flex justify-between items-center">
-            <p className="text-sm text-gray-medium">Showing 5 of 147 products</p>
-            <div className="flex gap-2">
-              <button className="px-4 py-2 border border-gray-light rounded text-sm hover:border-black transition-colors">
-                ← Previous
-              </button>
-              <button className="px-4 py-2 border border-black text-black rounded text-sm hover:bg-black hover:text-cream transition-colors">
-                1
-              </button>
-              <button className="px-4 py-2 border border-gray-light rounded text-sm hover:border-black transition-colors">
-                2
-              </button>
-              <button className="px-4 py-2 border border-gray-light rounded text-sm hover:border-black transition-colors">
-                Next →
-              </button>
+          {!isLoading && total > 0 && (
+            <div className="p-6 border-t border-gray-light flex justify-between items-center">
+              <p className="text-sm text-gray-medium">Showing {products.length} of {total} products</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-4 py-2 border border-gray-light rounded text-sm hover:border-black transition-colors disabled:opacity-50"
+                >
+                  ← Previous
+                </button>
+                <button className="px-4 py-2 border border-black text-black rounded text-sm hover:bg-black hover:text-cream transition-colors">
+                  {page}
+                </button>
+                <button
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={products.length < 20}
+                  className="px-4 py-2 border border-gray-light rounded text-sm hover:border-black transition-colors disabled:opacity-50"
+                >
+                  Next →
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-
-        {/* Coming Soon Notice */}
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-900">
-            <strong>Coming Soon:</strong> Full product management with image uploads, bulk editing, and variant management will be available in Phase 6.
-          </p>
+          )}
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ProductsModule } from './products/products.module';
+import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
 import { WishlistModule } from './wishlist/wishlist.module';
 import { IdentityModule } from './identity/identity.module';
@@ -26,7 +27,7 @@ import { CustomerModule } from './customer/customer.module';
  * - Admin: Admin operations (Phase 9+)
  */
 @Module({
-  imports: [ProductsModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
+  imports: [ProductsModule, CategoriesModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
   controllers: [],
   providers: [],
 })

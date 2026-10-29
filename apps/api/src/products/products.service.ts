@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * ProductService
@@ -13,19 +14,49 @@ import { Injectable } from '@nestjs/common';
  */
 @Injectable()
 export class ProductsService {
+  constructor(private prisma: PrismaService) {}
+
   /**
    * Get all products with filters
    * @param filters - Search and filter parameters
    * @returns Paginated product list
    */
-  async findAll(filters?: { category?: string; search?: string; sort?: string }) {
-    // TODO: Implement product fetching from database
-    // Placeholder for now - returns mock data
+  async findAll(filters?: { category?: string; search?: string; sort?: string; page?: number; limit?: number }) {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const skip = (page - 1) * limit;
+
+    const whereClause: any = {
+      isActive: true,
+    };
+
+    if (filters?.category) {
+      whereClause.category = { slug: filters.category };
+    }
+
+    if (filters?.search) {
+      whereClause.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        include: { category: true, images: true },
+        orderBy: this.getOrderBy(filters?.sort),
+      }),
+      this.prisma.product.count({ where: whereClause }),
+    ]);
+
     return {
-      data: [],
-      total: 0,
-      page: 1,
-      pageSize: 20,
+      data: products,
+      total,
+      page,
+      pageSize: limit,
     };
   }
 
@@ -35,8 +66,16 @@ export class ProductsService {
    * @returns Product details
    */
   async findById(id: string) {
-    // TODO: Implement product lookup
-    return null;
+    const product = await this.prisma.product.findUnique({
+      where: { id },
+      include: { category: true, images: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+
+    return product;
   }
 
   /**
@@ -45,8 +84,31 @@ export class ProductsService {
    * @returns Created product
    */
   async create(data: any) {
-    // TODO: Implement product creation
-    return null;
+    if (!data.name || !data.sku || data.price === undefined) {
+      throw new BadRequestException('Name, SKU, and price are required');
+    }
+
+    const existingSku = await this.prisma.product.findUnique({ where: { sku: data.sku } });
+    if (existingSku) {
+      throw new BadRequestException('SKU already exists');
+    }
+
+    const product = await this.prisma.product.create({
+      data: {
+        name: data.name,
+        description: data.description || '',
+        sku: data.sku,
+        price: Math.round(data.price),
+        originalPrice: data.originalPrice ? Math.round(data.originalPrice) : null,
+        categoryId: data.categoryId || null,
+        isActive: data.isActive !== false,
+        colors: data.colors || [],
+        sizes: data.sizes || [],
+      },
+      include: { category: true, images: true },
+    });
+
+    return product;
   }
 
   /**
@@ -56,8 +118,35 @@ export class ProductsService {
    * @returns Updated product
    */
   async update(id: string, data: any) {
-    // TODO: Implement product update
-    return null;
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+
+    if (data.sku && data.sku !== product.sku) {
+      const existingSku = await this.prisma.product.findUnique({ where: { sku: data.sku } });
+      if (existingSku) {
+        throw new BadRequestException('SKU already exists');
+      }
+    }
+
+    const updated = await this.prisma.product.update({
+      where: { id },
+      data: {
+        name: data.name || product.name,
+        description: data.description !== undefined ? data.description : product.description,
+        sku: data.sku || product.sku,
+        price: data.price !== undefined ? Math.round(data.price) : product.price,
+        originalPrice: data.originalPrice !== undefined ? Math.round(data.originalPrice) : product.originalPrice,
+        categoryId: data.categoryId !== undefined ? data.categoryId : product.categoryId,
+        isActive: data.isActive !== undefined ? data.isActive : product.isActive,
+        colors: data.colors || product.colors,
+        sizes: data.sizes || product.sizes,
+      },
+      include: { category: true, images: true },
+    });
+
+    return updated;
   }
 
   /**
@@ -65,7 +154,27 @@ export class ProductsService {
    * @param id - Product ID
    */
   async delete(id: string) {
-    // TODO: Implement product deletion
-    return true;
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+
+    await this.prisma.product.delete({ where: { id } });
+    return { success: true, message: 'Product deleted successfully' };
+  }
+
+  private getOrderBy(sort?: string) {
+    switch (sort) {
+      case 'price_asc':
+        return { price: 'asc' };
+      case 'price_desc':
+        return { price: 'desc' };
+      case 'newest':
+        return { createdAt: 'desc' };
+      case 'oldest':
+        return { createdAt: 'asc' };
+      default:
+        return { createdAt: 'desc' };
+    }
   }
 }
