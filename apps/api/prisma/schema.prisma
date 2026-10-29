@@ -134,6 +134,9 @@ model Product {
   // Order items
   orderItems  OrderItem[]
 
+  // Inventory (Phase 12)
+  inventory   Inventory[]
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -207,32 +210,53 @@ model WishlistItem {
 model Order {
   id            String    @id @default(cuid())
   userId        String
+  orderNumber   String    @unique  // e.g., PK-2024-001 (Phase 11 addition)
 
-  // Order status
-  status        String    @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
+  // Fulfillment status
+  status        String    @default("pending") // pending, confirmed, processing, packed, shipped, out_for_delivery, delivered, cancelled
+
+  // Payment
+  paymentMethod String    @default("cod") // card, upi, netbanking, cod
+  paymentStatus String    @default("pending") // pending, completed, failed, refunded
 
   // Pricing
-  subtotal      Int       // in paise
+  subtotal      Int       // in paise (before discount)
+  discount      Int       @default(0) // discount amount in paise (Phase 13)
   shipping      Int       @default(0)
   tax           Int       @default(0)
-  total         Int
+  total         Int       // final amount in paise
 
-  // Delivery
+  // Promotions (Phase 13)
+  promotionId   String?   // Applied promotion ID
+  couponCode    String?   // Applied coupon code
+
+  // Shipping
+  shippingMethod String   @default("standard") // standard, express, overnight
+  carrier       String?   // e.g., "FedEx", "DHL" (Phase 11 addition)
   addressId     String?
   trackingNumber String?
   estimatedDelivery DateTime?
 
+  // Admin notes (Phase 11 addition)
+  notes         String?
+  internalNotes String?   // For admin-only notes
+
   // Order items
   items         OrderItem[]
 
+  // Relations
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promotion     Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([userId])
   @@index([status])
+  @@index([paymentStatus])
+  @@index([promotionId])
   @@index([createdAt])
+  @@index([orderNumber])
 }
 
 model OrderItem {
@@ -250,4 +274,194 @@ model OrderItem {
 
   @@index([orderId])
   @@index([productId])
+}
+
+// ============================================================================
+// INVENTORY (Phase 12)
+// ============================================================================
+
+model Inventory {
+  id                String    @id @default(cuid())
+  productId         String
+
+  // Variant details (size/color combination)
+  size              String?   // null for products without sizes
+  color             String?   // null for products without colors
+
+  // Stock levels (all in units)
+  onHand            Int       @default(0)    // Physically recorded stock
+  reserved          Int       @default(0)    // Stock allocated to active orders
+  reorderThreshold  Int       @default(10)   // Low-stock threshold
+
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Audit trail
+  adjustments       InventoryAdjustment[]
+  auditLogs         InventoryAuditLog[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([productId, size, color]) // One inventory record per variant
+  @@index([productId])
+  @@index([onHand])
+}
+
+model InventoryAdjustment {
+  id                String    @id @default(cuid())
+  inventoryId       String
+
+  // Adjustment details
+  type              String    // 'received', 'correction', 'damage', 'manual_reconciliation', 'reserved', 'released'
+  quantity          Int       // Can be positive or negative
+  reason            String    // Required reason for audit trail
+  reference         String?   // Optional reference (PO number, order ID, etc.)
+
+  // Change tracking
+  previousOnHand    Int       // Stock level before adjustment
+  newOnHand         Int       // Stock level after adjustment
+
+  // Admin info
+  adminId           String?   // Admin who made the adjustment
+  notes             String?
+
+  inventory         Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime  @default(now())
+
+  @@index([inventoryId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model InventoryAuditLog {
+  id                String    @id @default(cuid())
+  inventoryId       String
+  adjustmentId      String?   // Reference to adjustment if from adjustment
+
+  // State change
+  previousOnHand    Int
+  newOnHand         Int
+  previousReserved  Int
+  newReserved       Int
+
+  // What changed
+  changeType        String    // 'adjustment', 'reservation', 'release', 'order_placed', 'order_cancelled'
+  reason            String?
+  reference         String?   // e.g., order ID, adjustment ID
+
+  // Who changed it
+  userId            String?   // For customer actions
+  adminId           String?   // For admin actions
+
+  inventory         Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime  @default(now())
+
+  @@index([inventoryId])
+  @@index([changeType])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PROMOTIONS & COUPONS (Phase 13)
+// ============================================================================
+
+model Promotion {
+  id                    String    @id @default(cuid())
+  name                  String    @unique
+  description           String?
+
+  // Promotion type and discount
+  type                  String    // 'percentage', 'fixed_amount', 'free_shipping'
+  value                 Int?      // For percentage: 0-100, For fixed: amount in paise
+  maxDiscount           Int?      // Maximum discount cap in paise (for percentage promos)
+
+  // Eligibility rules
+  minSubtotal           Int?      // Minimum order subtotal in paise
+  firstOrderOnly        Boolean   @default(false)
+
+  // Products & categories
+  eligibleProductIds    String[]  @default([]) // Empty = all products eligible
+  eligibleCategoryIds   String[]  @default([]) // Empty = all categories eligible
+  excludedProductIds    String[]  @default([])
+  excludedCategoryIds   String[]  @default([])
+
+  // Schedule
+  startDate             DateTime?
+  expiryDate            DateTime?
+  isActive              Boolean   @default(false)
+
+  // Usage limits
+  totalUsageLimit       Int?      // Total times this promotion can be used
+  usageCount            Int       @default(0)
+  perCustomerLimit      Int?      // Max times per customer
+
+  // Metadata
+  code                  String?   // For manual coupon-based promotions
+  isArchived            Boolean   @default(false)
+
+  // Relations
+  orders                Order[]
+  coupons               CouponCode[]
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([expiryDate])
+}
+
+model CouponCode {
+  id                String    @id @default(cuid())
+  code              String    @unique // Case-insensitive in application
+  promotionId       String
+
+  // Specific coupon limits (can override promotion limits)
+  usageLimit        Int?      // Total uses for this code
+  usageCount        Int       @default(0)
+  perCustomerLimit  Int?      // Per-customer limit for this code
+
+  // Status
+  isActive          Boolean   @default(true)
+  expiryDate        DateTime?
+
+  // Metadata
+  generatedAt       DateTime  @default(now())
+  description       String?
+
+  // Relations
+  promotion         Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  redemptions       CouponRedemption[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([code])
+  @@index([promotionId])
+  @@index([isActive])
+}
+
+model CouponRedemption {
+  id              String    @id @default(cuid())
+  couponCodeId    String
+  userId          String
+  orderId         String?   // NULL if redemption cancelled/failed
+
+  // Redemption status
+  status          String    @default("completed") // 'completed', 'cancelled', 'refunded'
+  discountAmount  Int       // Amount redeemed in paise
+
+  // Relations
+  couponCode      CouponCode @relation(fields: [couponCodeId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([couponCodeId])
+  @@index([userId])
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
 }
