@@ -1,6 +1,11 @@
+'use client';
+
 import Link from 'next/link';
+import { Logo } from './Logo';
 
 export const Footer: React.FC = () => {
+  const currentYear = new Date().getFullYear();
+
   return (
     <footer className="bg-black text-cream py-16 md:py-24 px-4 sm:px-6 md:px-8">
       <div className="w-full max-w-7xl mx-auto">
@@ -8,16 +13,16 @@ export const Footer: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12 mb-12">
           {/* Brand Column */}
           <div>
-            <div className="mb-4">
-              <svg className="w-8 h-8 text-cream" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4 20h16v-2l-8-6-4 6-4-6V8L4 14z" />
-              </svg>
-            </div>
-            <h3 className="text-base font-bold mb-3 tracking-wider">PREMAL KAIZEN</h3>
+            <Link href="/" className="inline-flex items-center gap-2 mb-4 hover:opacity-80 transition-opacity">
+              <div className="w-8 h-8 text-cream flex-shrink-0">
+                <Logo className="w-full h-full" />
+              </div>
+              <span className="text-sm font-bold tracking-widest uppercase">PREMAL KAIZEN</span>
+            </Link>
             <p className="text-sm text-gray-light leading-relaxed mb-4">
-              Elevated streetwear crafted for the modern explorer. Wear your vibe. Own your story.
+              Wear your vibe. Own your story.
             </p>
-            <p className="text-xs text-gray-500">Designed in Hong Kong</p>
+            <p className="text-xs text-gray-500">Premium streetwear for the modern explorer.</p>
           </div>
 
           {/* Shop Links */}
@@ -25,10 +30,9 @@ export const Footer: React.FC = () => {
             <h4 className="text-xs font-bold mb-4 tracking-widest uppercase text-cream">Shop</h4>
             <ul className="space-y-3 text-sm">
               {[
+                { label: 'All Products', href: '/shop' },
                 { label: 'New Arrivals', href: '/shop?filter=new' },
                 { label: 'Best Sellers', href: '/shop?filter=popular' },
-                { label: 'All Products', href: '/shop' },
-                { label: 'Collections', href: '/collections' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link
@@ -42,7 +46,7 @@ export const Footer: React.FC = () => {
             </ul>
           </div>
 
-          {/* Customer Care */}
+          {/* Customer Support */}
           <div>
             <h4 className="text-xs font-bold mb-4 tracking-widest uppercase text-cream">
               Support
@@ -50,8 +54,6 @@ export const Footer: React.FC = () => {
             <ul className="space-y-3 text-sm">
               {[
                 { label: 'Contact Us', href: '/contact' },
-                { label: 'Shipping Info', href: '/shipping' },
-                { label: 'Returns & Exchange', href: '/returns' },
                 { label: 'Track Order', href: '/orders' },
               ].map((link) => (
                 <li key={link.href}>
@@ -63,18 +65,24 @@ export const Footer: React.FC = () => {
                   </Link>
                 </li>
               ))}
+              <li>
+                <a
+                  href="mailto:support@premalikaizen.com"
+                  className="text-gray-light hover:text-cream transition-colors"
+                >
+                  Email Support
+                </a>
+              </li>
             </ul>
           </div>
 
-          {/* Company */}
+          {/* About */}
           <div>
-            <h4 className="text-xs font-bold mb-4 tracking-widest uppercase text-cream">Company</h4>
+            <h4 className="text-xs font-bold mb-4 tracking-widest uppercase text-cream">About</h4>
             <ul className="space-y-3 text-sm">
               {[
                 { label: 'About Us', href: '/about' },
-                { label: 'Journal', href: '/journal' },
-                { label: 'Careers', href: '/careers' },
-                { label: 'Press', href: '/press' },
+                { label: 'Our Story', href: '/about' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link
@@ -85,6 +93,16 @@ export const Footer: React.FC = () => {
                   </Link>
                 </li>
               ))}
+              <li>
+                <a
+                  href="https://www.instagram.com/premalkaizen"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gray-light hover:text-cream transition-colors"
+                >
+                  Instagram
+                </a>
+              </li>
             </ul>
           </div>
         </div>
@@ -94,19 +112,12 @@ export const Footer: React.FC = () => {
 
         {/* Bottom Footer */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-gray-500">
-          <p>© 2024 PREMAL KAIZEN — All rights reserved.</p>
+          <p>© {currentYear} PREMAL KAIZEN — All rights reserved.</p>
           <div className="flex gap-6 md:gap-8">
-            <Link href="/shipping" className="hover:text-cream transition-colors">Shipping Policy</Link>
-            <Link href="/returns" className="hover:text-cream transition-colors">Returns</Link>
-            <Link href="/privacy" className="hover:text-cream transition-colors">Privacy Policy</Link>
-            <Link href="/terms" className="hover:text-cream transition-colors">Terms</Link>
+            <Link href="/contact" className="hover:text-cream transition-colors">Contact</Link>
+            <Link href="/orders" className="hover:text-cream transition-colors">Track Order</Link>
+            <a href="mailto:support@premalikaizen.com" className="hover:text-cream transition-colors">Support</a>
           </div>
-        </div>
-
-        {/* Contact info at bottom */}
-        <div className="mt-8 pt-8 border-t border-gray-800 text-center">
-          <p className="text-xs text-gray-500 mb-2">Questions? We're here to help</p>
-          <p className="text-sm text-gray-light font-medium">support@premalikaizen.com</p>
         </div>
       </div>
     </footer>
