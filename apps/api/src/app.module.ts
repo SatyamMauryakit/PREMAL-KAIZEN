@@ -5,6 +5,10 @@ import { CartModule } from './cart/cart.module';
 import { WishlistModule } from './wishlist/wishlist.module';
 import { IdentityModule } from './identity/identity.module';
 import { CustomerModule } from './customer/customer.module';
+import { OrdersModule } from './orders/orders.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { PromotionsModule } from './promotions/promotions.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 /**
  * AppModule
@@ -25,9 +29,12 @@ import { CustomerModule } from './customer/customer.module';
  * - Payment: Payment processing
  * - Notifications: Email and SMS
  * - Admin: Admin operations (Phase 9+)
+ * - Inventory: Stock and inventory management (Phase 12)
+ * - Promotions: Discounts and coupon management (Phase 13)
+ * - Analytics: Admin dashboard and business analytics (Phase 15)
  */
 @Module({
-  imports: [ProductsModule, CategoriesModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
+  imports: [ProductsModule, CategoriesModule, OrdersModule, InventoryModule, PromotionsModule, AnalyticsModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
   controllers: [],
   providers: [],
 })
