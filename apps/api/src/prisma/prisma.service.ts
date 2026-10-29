@@ -39,6 +39,24 @@ export class PrismaService {
     findFirst: async (query: any) => null,
   };
 
+  product: any = {
+    findMany: async (query?: any) => [],
+    findUnique: async (query: any) => null,
+    create: async (query: any) => ({ id: 'demo-product-1', ...query.data }),
+    update: async (query: any) => ({ id: 'demo-product-1', ...query.data }),
+    delete: async (query: any) => ({}),
+    count: async (query?: any) => 0,
+  };
+
+  category: any = {
+    findMany: async (query?: any) => [],
+    findUnique: async (query: any) => null,
+    create: async (query: any) => ({ id: 'demo-category-1', ...query.data }),
+    update: async (query: any) => ({ id: 'demo-category-1', ...query.data }),
+    delete: async (query: any) => ({}),
+    count: async (query?: any) => 0,
+  };
+
   async onModuleInit() {
     // Mock connect
   }

@@ -1,8 +1,15 @@
 'use client';
 
 import Link from 'next/link';
+import { use } from 'react';
 
-export default function OrderConfirmationPage({ params }: { params: { orderId: string } }) {
+interface OrderConfirmationPageProps {
+  params: Promise<{ orderId: string }>;
+}
+
+export default function OrderConfirmationPage({ params }: OrderConfirmationPageProps) {
+  const resolvedParams = params instanceof Promise ? use(params) : params;
+
   return (
     <main className="min-h-screen bg-cream pt-20 md:pt-24 flex items-center justify-center px-4">
       <div className="max-w-2xl w-full">
@@ -10,7 +17,7 @@ export default function OrderConfirmationPage({ params }: { params: { orderId: s
           <div className="text-6xl mb-6">✓</div>
           <h1 className="text-4xl font-display font-bold text-black mb-4">Order Confirmed!</h1>
           <p className="text-gray-700 text-lg mb-2">Thank you for your purchase.</p>
-          <p className="text-gray-600 mb-8">Order ID: <span className="font-mono font-bold">{params.orderId}</span></p>
+          <p className="text-gray-600 mb-8">Order ID: <span className="font-mono font-bold">{resolvedParams.orderId}</span></p>
 
           <div className="bg-cream rounded-lg p-6 mb-8 text-left">
             <p className="text-sm text-gray-700 mb-4">

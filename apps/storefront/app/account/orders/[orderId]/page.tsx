@@ -8,25 +8,38 @@ import Link from 'next/link';
 
 const STATUS_SEQUENCE: OrderStatus[] = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
 
-export default function OrderDetailsPage({ params }: { params: { orderId: string } }) {
+interface OrderDetailsPageProps {
+  params: Promise<{ orderId: string }>;
+}
+
+export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
   const { user, isLoading } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [timeline, setTimeline] = useState<OrderTimeline[]>([]);
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [orderId, setOrderId] = useState<string>('');
 
   useEffect(() => {
-    if (isLoading || !user) return;
+    const resolveParams = async () => {
+      const resolvedParams = await params;
+      setOrderId(resolvedParams.orderId);
+    };
+    resolveParams();
+  }, [params]);
+
+  useEffect(() => {
+    if (isLoading || !user || !orderId) return;
 
     const loadOrder = async () => {
       try {
         const token = localStorage.getItem('sessionToken');
         if (!token) throw new Error('Not authenticated');
-        const orderData = await orderService.getOrder(params.orderId, token);
+        const orderData = await orderService.getOrder(orderId, token);
         if (!orderData) throw new Error('Order not found');
         setOrder(orderData);
 
-        const timelineData = await orderService.getOrderTimeline(params.orderId, token);
+        const timelineData = await orderService.getOrderTimeline(orderId, token);
         setTimeline(timelineData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load order');
@@ -36,7 +49,7 @@ export default function OrderDetailsPage({ params }: { params: { orderId: string
     };
 
     loadOrder();
-  }, [user, isLoading, params.orderId]);
+  }, [user, isLoading, orderId]);
 
   if (isLoading || isLoadingOrder) {
     return <div className="text-center py-12"><p className="text-gray-600">Loading order...</p></div>;
