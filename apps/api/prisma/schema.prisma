@@ -465,3 +465,68 @@ model CouponRedemption {
   @@index([status])
   @@index([createdAt])
 }
+
+// ============================================================================
+// STORE SETTINGS (Phase 16)
+// ============================================================================
+
+model StoreSettings {
+  id                String    @id @default("singleton") // Always use 'singleton' to enforce single record
+
+  // Store Information
+  storeName         String    @default("PREMAL KAIZEN")
+  storeEmail        String    @default("support@premalkaizen.com")
+  storePhone        String    @default("+91-XXX-XXX-XXXX")
+  businessAddress   String    @default("")
+
+  // Regional Settings
+  timezone          String    @default("Asia/Kolkata")
+  locale            String    @default("en-IN")
+  currency          String    @default("INR")
+
+  // Shipping Configuration (JSON stored as text for flexibility)
+  shippingMethods   String    @default("[]") // JSON array of shipping methods
+
+  // Tax Configuration
+  defaultTaxRate    Float     @default(0)   // Default tax rate as percentage
+  taxCalculationMode String   @default("exclusive") // 'inclusive' or 'exclusive'
+
+  // Checkout Policies
+  guestCheckoutEnabled Boolean @default(true)
+  minimumOrderValue  Int      @default(0)   // Minimum order value in paise
+  maintenanceMode   Boolean  @default(false)
+  maintenanceMessage String   @default("")
+
+  // Notification Preferences
+  orderConfirmationEnabled Boolean @default(true)
+  paymentNotificationsEnabled Boolean @default(true)
+  shippingNotificationsEnabled Boolean @default(true)
+  lowStockNotificationsEnabled Boolean @default(true)
+
+  // Security & Integrations
+  stripeEnabled     Boolean  @default(false)
+  razorpayEnabled   Boolean  @default(false)
+  emailNotificationsEnabled Boolean @default(true)
+  smsNotificationsEnabled Boolean @default(false)
+
+  // Audit
+  lastModifiedAt    DateTime  @default(now()) @updatedAt
+  lastModifiedBy    String?   // Admin user ID who made the last change
+
+  @@unique([id]) // Enforce singleton pattern
+}
+
+model SettingsAuditLog {
+  id                String    @id @default(cuid())
+  setting           String    // Name of the setting that was changed
+  previousValue     String?   // Previous value (JSON string)
+  newValue          String?   // New value (JSON string)
+  changedBy         String    // Admin user ID
+  changeReason      String?   // Reason for the change
+
+  createdAt         DateTime  @default(now())
+
+  @@index([setting])
+  @@index([changedBy])
+  @@index([createdAt])
+}

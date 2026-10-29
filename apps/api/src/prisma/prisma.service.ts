@@ -319,6 +319,76 @@ export class PrismaService {
     update: async (query: any) => ({ id: 'redemption-1', ...query.data, updatedAt: new Date() }),
   };
 
+  storeSettings: any = {
+    findUnique: async (query: any) => {
+      if (query.where.id === 'singleton') {
+        return {
+          id: 'singleton',
+          storeName: 'PREMAL KAIZEN',
+          storeEmail: 'support@premalkaizen.com',
+          storePhone: '+91-99XXX-XXXXX',
+          businessAddress: 'Gurugram, Haryana, India',
+          timezone: 'Asia/Kolkata',
+          locale: 'en-IN',
+          currency: 'INR',
+          shippingMethods: JSON.stringify([
+            {
+              id: 'standard',
+              name: 'Standard Shipping',
+              description: 'Delivery in 5-7 business days',
+              price: 5000,
+              estimatedDays: 6,
+              enabled: true,
+            },
+            {
+              id: 'express',
+              name: 'Express Shipping',
+              description: 'Delivery in 2-3 business days',
+              price: 10000,
+              estimatedDays: 2,
+              enabled: true,
+            },
+          ]),
+          defaultTaxRate: 18,
+          taxCalculationMode: 'exclusive',
+          guestCheckoutEnabled: true,
+          minimumOrderValue: 0,
+          maintenanceMode: false,
+          maintenanceMessage: '',
+          orderConfirmationEnabled: true,
+          paymentNotificationsEnabled: true,
+          shippingNotificationsEnabled: true,
+          lowStockNotificationsEnabled: true,
+          stripeEnabled: false,
+          razorpayEnabled: false,
+          emailNotificationsEnabled: true,
+          smsNotificationsEnabled: false,
+          lastModifiedAt: new Date(),
+          lastModifiedBy: null,
+        };
+      }
+      return null;
+    },
+    create: async (query: any) => ({
+      id: 'singleton',
+      ...query.data,
+      lastModifiedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
+    update: async (query: any) => ({
+      id: 'singleton',
+      ...query.data,
+      lastModifiedAt: new Date(),
+      updatedAt: new Date(),
+    }),
+  };
+
+  settingsAuditLog: any = {
+    findMany: async (query?: any) => [],
+    create: async (query: any) => ({ id: 'audit-1', ...query.data, createdAt: new Date() }),
+  };
+
   // Transaction support for mock
   $transaction: async (callback: any) => {
     return callback(this);
