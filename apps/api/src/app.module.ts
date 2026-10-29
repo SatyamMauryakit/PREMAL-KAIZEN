@@ -10,6 +10,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SettingsModule } from './settings/settings.module';
+import { ContactModule } from './contact/contact.module';
 
 /**
  * AppModule
@@ -34,9 +35,10 @@ import { SettingsModule } from './settings/settings.module';
  * - Promotions: Discounts and coupon management (Phase 13)
  * - Analytics: Admin dashboard and business analytics (Phase 15)
  * - Settings: Store configuration and admin settings (Phase 16)
+ * - Contact: Contact form submissions (Storefront)
  */
 @Module({
-  imports: [ProductsModule, CategoriesModule, OrdersModule, InventoryModule, PromotionsModule, AnalyticsModule, SettingsModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
+  imports: [ProductsModule, CategoriesModule, OrdersModule, InventoryModule, PromotionsModule, AnalyticsModule, SettingsModule, ContactModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
   controllers: [],
   providers: [],
 })
