@@ -4,6 +4,8 @@ import { Header } from '@/components/Header';
 import { useState, useEffect } from 'react';
 import { adminSettingsService, StoreSettings, ShippingMethod } from '@/lib/settings-service';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -16,6 +18,39 @@ export default function SettingsPage() {
   const [shippingMethods, setShippingMethods] = useState<ShippingMethod[]>([]);
   const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [newAdminFirstName, setNewAdminFirstName] = useState('');
+  const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
+  const [adminCreateMessage, setAdminCreateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminCreateMessage(null);
+    if (newAdminPassword.length < 8) {
+      setAdminCreateMessage({ type: 'error', text: 'Password must be at least 8 characters' });
+      return;
+    }
+    setIsCreatingAdmin(true);
+    try {
+      const token = localStorage.getItem('adminSessionToken');
+      const response = await fetch(`${API_BASE}/api/auth/admin/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: newAdminEmail, password: newAdminPassword, firstName: newAdminFirstName }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Failed to create administrator');
+      setAdminCreateMessage({ type: 'success', text: `Administrator ${data.user.email} created successfully` });
+      setNewAdminEmail('');
+      setNewAdminPassword('');
+      setNewAdminFirstName('');
+    } catch (err) {
+      setAdminCreateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create administrator' });
+    } finally {
+      setIsCreatingAdmin(false);
+    }
+  };
 
   useEffect(() => {
     loadSettings();
@@ -453,6 +488,60 @@ export default function SettingsPage() {
               </div>
               <div className="bg-blue-50 border border-blue-200 rounded p-4 mt-4 text-sm text-blue-900">
                 <strong>Note:</strong> Payment provider keys and secrets are configured via environment variables for security. Do not store them in database settings.
+              </div>
+
+              <div className="border-t border-gray-light pt-6 mt-6">
+                <h3 className="text-sm font-medium text-black mb-1">Add Administrator</h3>
+                <p className="text-xs text-gray-medium mb-4">
+                  Create another administrator account. They will have full access to this admin panel.
+                </p>
+
+                {adminCreateMessage && (
+                  <div
+                    className={`mb-4 px-4 py-3 rounded text-sm ${
+                      adminCreateMessage.type === 'success'
+                        ? 'bg-green-50 border border-green-200 text-green-700'
+                        : 'bg-red-50 border border-red-200 text-red-700'
+                    }`}
+                  >
+                    {adminCreateMessage.text}
+                  </div>
+                )}
+
+                <form onSubmit={handleCreateAdmin} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <input
+                    type="text"
+                    placeholder="First name"
+                    value={newAdminFirstName}
+                    onChange={(e) => setNewAdminFirstName(e.target.value)}
+                    className="px-3 py-2 border border-gray-light rounded text-sm"
+                    required
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email address"
+                    value={newAdminEmail}
+                    onChange={(e) => setNewAdminEmail(e.target.value)}
+                    className="px-3 py-2 border border-gray-light rounded text-sm"
+                    required
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password (min 8 characters)"
+                    value={newAdminPassword}
+                    onChange={(e) => setNewAdminPassword(e.target.value)}
+                    minLength={8}
+                    className="px-3 py-2 border border-gray-light rounded text-sm"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    disabled={isCreatingAdmin}
+                    className="md:col-span-3 px-4 py-2 bg-black text-cream rounded hover:bg-gray-dark disabled:opacity-50 transition-colors text-sm font-medium"
+                  >
+                    {isCreatingAdmin ? 'Creating...' : 'Create Administrator'}
+                  </button>
+                </form>
               </div>
             </div>
           )}

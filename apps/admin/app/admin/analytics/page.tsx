@@ -178,7 +178,7 @@ export default function AnalyticsDashboard() {
               <div className="bg-white rounded-lg border border-gray-light p-4">
                 <p className="text-xs text-gray-medium mb-1">Discounts Applied</p>
                 <p className="text-2xl font-bold text-black">{formatPrice(metrics.discountsApplied)}</p>
-                <p className="text-xs text-gray-dark mt-2">{Math.round((metrics.discountsApplied / metrics.grossSales) * 100)}% of sales</p>
+                <p className="text-xs text-gray-dark mt-2">{metrics.grossSales > 0 ? Math.round((metrics.discountsApplied / metrics.grossSales) * 100) : 0}% of sales</p>
               </div>
 
               {/* Avg Order Value */}

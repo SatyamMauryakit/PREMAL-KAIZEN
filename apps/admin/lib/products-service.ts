@@ -88,7 +88,7 @@ export const adminProductsService = {
   },
 
   async getProduct(id: string, token: string): Promise<ProductResponse> {
-    const response = await fetch(`${API_BASE}/api/products/${id}`, {
+    const response = await fetch(`${API_BASE}/api/products/${id}/full`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 

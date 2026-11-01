@@ -101,11 +101,11 @@ export default function AdminLoginPage() {
         </div>
 
         {/* Footer */}
-        <div className="text-center mt-6 text-sm text-gray-medium">
+        <div className="text-center mt-6 text-sm text-gray-medium space-y-2">
           <p>
-            Not an admin?{' '}
-            <Link href="/" className="text-beige hover:text-beige-light transition-colors">
-              Back to home
+            First time setting up this store?{' '}
+            <Link href="/auth/signup" className="text-beige hover:text-beige-light transition-colors">
+              Create admin account
             </Link>
           </p>
         </div>

@@ -1,6 +1,8 @@
-import { Controller, Post, Get, Body, Request, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Request, Res, UseGuards, BadRequestException } from '@nestjs/common';
 import { Response } from 'express';
 import { IdentityService } from './identity.service';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 /**
  * IdentityController
@@ -30,6 +32,62 @@ export class IdentityController {
       message: 'Registration successful. Please check your email to verify your account.',
       user,
     });
+  }
+
+  /**
+   * GET /api/auth/admin/exists
+   * Public, non-sensitive check used by the admin signup page to decide
+   * whether to show the first-admin bootstrap form or the "ask an admin" message.
+   */
+  @Get('admin/exists')
+  async adminExists(@Res() res: Response) {
+    const exists = await this.identityService.adminExists();
+    return res.json({ exists });
+  }
+
+  /**
+   * POST /api/auth/admin/bootstrap
+   * Create the first administrator. Self-disables once an admin exists,
+   * so this is safe to expose without authentication.
+   */
+  @Post('admin/bootstrap')
+  async bootstrapFirstAdmin(
+    @Body() body: { email: string; password: string; firstName?: string; lastName?: string },
+    @Res() res: Response,
+  ) {
+    if (!body.email || !body.password) {
+      throw new BadRequestException('Email and password are required');
+    }
+
+    const user = await this.identityService.bootstrapFirstAdmin(body.email, body.password, body.firstName, body.lastName);
+    const session = await this.identityService.login(body.email, body.password);
+
+    res.cookie('sessionToken', session.sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({ success: true, user, sessionToken: session.sessionToken });
+  }
+
+  /**
+   * POST /api/auth/admin/create
+   * Create an additional administrator. Requires an existing authenticated admin.
+   */
+  @UseGuards(AuthGuard, AdminGuard)
+  @Post('admin/create')
+  async createAdmin(
+    @Body() body: { email: string; password: string; firstName?: string; lastName?: string },
+    @Res() res: Response,
+  ) {
+    if (!body.email || !body.password) {
+      throw new BadRequestException('Email and password are required');
+    }
+
+    const user = await this.identityService.createAdmin(body.email, body.password, body.firstName, body.lastName);
+    return res.json({ success: true, user });
   }
 
   /**

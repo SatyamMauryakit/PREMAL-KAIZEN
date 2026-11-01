@@ -89,6 +89,7 @@ export class AnalyticsService {
     // Get new customers in date range
     const newCustomers = await this.prisma.user.count({
       where: {
+        role: 'customer',
         createdAt: {
           gte: startDate,
           lte: endDate,

@@ -69,13 +69,18 @@ export class ProductsService {
    * @param id - Product ID
    * @returns Product details
    */
-  async findById(id: string) {
+  /**
+   * @param includeInactive - admin-only: lets the edit screen load a draft/unpublished
+   * product. Public callers must leave this false so unpublished products stay hidden,
+   * even when someone has the direct URL.
+   */
+  async findById(id: string, includeInactive = false) {
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: { category: true, images: { orderBy: { order: 'asc' } } },
     });
 
-    if (!product) {
+    if (!product || (!includeInactive && !product.isActive)) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
 

@@ -20,7 +20,7 @@ export class CustomerAdminService {
     const limit = Number(filters?.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const whereClause: any = {};
+    const whereClause: any = { role: 'customer' };
 
     // Search by name or email
     if (filters?.search) {
@@ -315,10 +315,10 @@ export class CustomerAdminService {
       verifiedEmails,
       totalOrderValue,
     ] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.user.count({ where: { isActive: true } }),
-      this.prisma.user.count({ where: { isActive: false } }),
-      this.prisma.user.count({ where: { emailVerified: { not: null } } }),
+      this.prisma.user.count({ where: { role: 'customer' } }),
+      this.prisma.user.count({ where: { role: 'customer', isActive: true } }),
+      this.prisma.user.count({ where: { role: 'customer', isActive: false } }),
+      this.prisma.user.count({ where: { role: 'customer', emailVerified: { not: null } } }),
       this.prisma.order.aggregate({
         _sum: { total: true },
       }),

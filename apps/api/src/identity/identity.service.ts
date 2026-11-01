@@ -27,42 +27,75 @@ export class IdentityService {
    * @returns User object (without password)
    */
   async register(email: string, password: string, firstName?: string, lastName?: string) {
-    // Validate email format
+    const user = await this.createUser(email, password, firstName, lastName, 'customer');
+    await this.createVerificationToken(user.email, 'email_verification');
+    return user;
+  }
+
+  /**
+   * Returns true if any administrator account already exists.
+   * Used to gate the one-time first-admin bootstrap.
+   */
+  async adminExists(): Promise<boolean> {
+    const count = await this.prisma.user.count({ where: { role: 'admin' } });
+    return count > 0;
+  }
+
+  /**
+   * Create the first administrator account. Only works while no admin exists
+   * yet - self-disables permanently after the first successful call, so this
+   * can safely be exposed on a public endpoint.
+   */
+  async bootstrapFirstAdmin(email: string, password: string, firstName?: string, lastName?: string) {
+    if (await this.adminExists()) {
+      throw new ConflictException('An administrator already exists. Ask an existing admin to create your account.');
+    }
+    return this.createUser(email, password, firstName, lastName, 'admin');
+  }
+
+  /**
+   * Create an additional administrator. Caller must already be authenticated
+   * as an admin (enforced by AuthGuard + AdminGuard on the controller route).
+   */
+  async createAdmin(email: string, password: string, firstName?: string, lastName?: string) {
+    return this.createUser(email, password, firstName, lastName, 'admin');
+  }
+
+  private async createUser(
+    email: string,
+    password: string,
+    firstName: string | undefined,
+    lastName: string | undefined,
+    role: 'customer' | 'admin'
+  ) {
     if (!this.isValidEmail(email)) {
       throw new BadRequestException('Invalid email format');
     }
 
-    // Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
-
     if (existingUser) {
       throw new ConflictException('Email already registered');
     }
 
-    // Validate password strength
     if (password.length < 8) {
       throw new BadRequestException('Password must be at least 8 characters');
     }
 
-    // Hash password with bcrypt
     const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Create user
     const user = await this.prisma.user.create({
       data: {
         email: email.toLowerCase(),
         password: hashedPassword,
+        role,
         firstName: firstName || null,
         lastName: lastName || null,
+        emailVerified: role === 'admin' ? new Date() : null,
       },
     });
 
-    // Generate email verification token
-    await this.createVerificationToken(user.email, 'email_verification');
-
-    // Return user without password
     const { password: _, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }

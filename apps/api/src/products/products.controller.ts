@@ -32,11 +32,22 @@ export class ProductsController {
 
   /**
    * GET /api/products/:id
-   * Retrieve a single product by ID
+   * Retrieve a single published product by ID (storefront). Unpublished/draft
+   * products 404 here even with a direct link.
    */
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.productsService.findById(id);
+  }
+
+  /**
+   * GET /api/products/:id/full
+   * Admin-only: load a product regardless of published status, so drafts can be edited.
+   */
+  @UseGuards(AuthGuard, AdminGuard)
+  @Get(':id/full')
+  async findOneForAdmin(@Param('id') id: string) {
+    return this.productsService.findById(id, true);
   }
 
   /**

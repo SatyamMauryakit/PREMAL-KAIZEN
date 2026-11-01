@@ -8,8 +8,8 @@ const prisma = new PrismaClient();
  * Local development bootstrap.
  *
  * Creates (or updates) a single administrator account from env-provided
- * credentials, plus a handful of clearly-fictional demo products so the
- * storefront has something to display out of the box.
+ * credentials. No demo products/categories - create real ones through
+ * the admin panel.
  *
  * Credentials come from apps/api/.env (ADMIN_EMAIL / ADMIN_PASSWORD) and are
  * never logged. This script is safe to re-run - it upserts rather than
@@ -46,60 +46,6 @@ async function main() {
   });
 
   console.log(`✅ Admin account ready: ${admin.email} (role: ${admin.role})`);
-
-  // Demo category + products so the storefront has content to display locally.
-  const category = await prisma.category.upsert({
-    where: { slug: 'hoodies' },
-    update: {},
-    create: { name: 'Hoodies', slug: 'hoodies' },
-  });
-
-  const demoProducts = [
-    {
-      sku: 'PK-HOOD-001',
-      name: 'Oversized Hoodie',
-      description: 'Heavyweight cotton oversized hoodie built for layering. Demo product for local development.',
-      price: 59900,
-      originalPrice: 69900,
-      colors: ['Black', 'Charcoal'],
-      sizes: ['S', 'M', 'L', 'XL'],
-      images: ['https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=800'],
-    },
-    {
-      sku: 'PK-TEE-001',
-      name: 'Mountain Tee',
-      description: 'Breathable graphic tee with mountain print. Demo product for local development.',
-      price: 32900,
-      originalPrice: null,
-      colors: ['Sand', 'Olive'],
-      sizes: ['S', 'M', 'L'],
-      images: ['https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800'],
-    },
-  ];
-
-  for (const p of demoProducts) {
-    const existing = await prisma.product.findUnique({ where: { sku: p.sku } });
-    if (existing) continue;
-
-    await prisma.product.create({
-      data: {
-        sku: p.sku,
-        name: p.name,
-        description: p.description,
-        price: p.price,
-        originalPrice: p.originalPrice,
-        categoryId: category.id,
-        isActive: true,
-        colors: JSON.stringify(p.colors),
-        sizes: JSON.stringify(p.sizes),
-        images: {
-          create: p.images.map((url, index) => ({ url, alt: p.name, order: index })),
-        },
-      },
-    });
-  }
-
-  console.log('✅ Demo category and products seeded (skipped any that already exist)');
 }
 
 main()
