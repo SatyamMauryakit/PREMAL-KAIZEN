@@ -9,9 +9,9 @@ interface AdminLayoutProps {
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   return (
-    <div className="min-h-screen bg-gray-light">
+    <div className="min-h-screen bg-neutral-50">
       <Sidebar />
-      <main className="pl-64 transition-all duration-300">
+      <main className="ml-64 transition-all duration-300 min-h-screen">
         {children}
       </main>
     </div>

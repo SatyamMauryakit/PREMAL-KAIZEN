@@ -1,0 +1,36 @@
+=== PREMAL KAIZEN PROJECT AUDIT ===
+
+## PROJECT STRUCTURE
+
+### Root Level
+- package.json (Monorepo root)
+- apps/
+  - admin/ (Admin panel - Next.js)
+  - api/ (Backend API - NestJS)
+  - storefront/ (Customer storefront - Next.js)
+
+### Database
+- apps/api/prisma/schema.prisma (Main schema)
+- apps/api/prisma/migrations/ (Database migrations)
+
+### Documentation
+- PHASE_16.md (Phase 16 details)
+- STOREFRONT_PAGES_REPORT.md (Storefront pages details)
+
+## APPLICATIONS OVERVIEW
+
+### 1. Backend API (apps/api)
+- Framework: NestJS
+- Database ORM: Prisma
+- Language: TypeScript
+
+### 2. Admin Panel (apps/admin)
+- Framework: Next.js 15
+- Language: TypeScript
+- Authentication: Context-based with Bearer tokens
+
+### 3. Storefront (apps/storefront)
+- Framework: Next.js 15
+- Language: TypeScript
+- Authentication: Context-based with Bearer tokens
+

@@ -390,7 +390,7 @@ export class PrismaService {
   };
 
   // Transaction support for mock
-  $transaction: async (callback: any) => {
+  $transaction = async (callback: any) => {
     return callback(this);
   };
 
