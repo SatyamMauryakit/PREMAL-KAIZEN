@@ -5,28 +5,55 @@ import { useCheckout } from '@/lib/checkout-context';
 import { formatPrice } from '@/lib/pricing';
 import { useState } from 'react';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+
 export default function OrderReview() {
   const { items, clearCart } = useCart();
-  const { goToStep, shippingAddress, paymentMethod, setError } = useCheckout();
+  const { goToStep, shippingAddress, paymentMethod, shippingMethod, appliedCoupon, setError } = useCheckout();
   const [isPlacing, setIsPlacing] = useState(false);
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const discount = appliedCoupon?.discountAmount || 0;
+  const taxable = Math.max(0, subtotal - discount);
   const shipping = subtotal > 10000 ? 0 : 100;
-  const tax = Math.round(subtotal * 0.18);
-  const total = subtotal + shipping + tax;
+  const tax = Math.round(taxable * 0.18);
+  const total = taxable + tax + shipping;
 
   const handlePlaceOrder = async () => {
     setIsPlacing(true);
+    setError(null);
     try {
-      // TODO: Call backend API to create order
-      // const response = await fetch('/api/orders', { method: 'POST', body: JSON.stringify({...}) });
-      // if (!response.ok) throw new Error('Order failed');
+      const token = localStorage.getItem('sessionToken');
+      if (!token) {
+        throw new Error('Please log in to place an order.');
+      }
 
-      // Simulate order creation
-      await new Promise(r => setTimeout(r, 1500));
+      const response = await fetch(`${API_BASE}/api/orders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          items: items.map((i) => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            selectedSize: i.selectedSize,
+            selectedColor: i.selectedColor,
+          })),
+          couponCode: appliedCoupon?.code,
+          paymentMethod,
+          shippingMethod,
+        }),
+      });
+
+      const order = await response.json();
+      if (!response.ok) {
+        throw new Error(order.message || 'Failed to place order');
+      }
 
       clearCart();
-      window.location.href = `/order-confirmation/${Math.random().toString(36).substr(2, 9)}`;
+      window.location.href = `/order-confirmation/${order.id}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Order failed');
       setIsPlacing(false);
@@ -76,6 +103,11 @@ export default function OrderReview() {
 
         <div className="space-y-2 pt-4 border-t">
           <div className="flex justify-between text-gray-700"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
+          {discount > 0 && (
+            <div className="flex justify-between text-green-700">
+              <span>Voucher ({appliedCoupon?.code})</span><span>-{formatPrice(discount)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-gray-700"><span>Shipping</span><span>{shipping === 0 ? 'FREE' : formatPrice(shipping)}</span></div>
           <div className="flex justify-between text-gray-700"><span>Tax (18%)</span><span>{formatPrice(tax)}</span></div>
           <div className="flex justify-between pt-2 border-t font-bold text-black"><span>Total</span><span>{formatPrice(total)}</span></div>

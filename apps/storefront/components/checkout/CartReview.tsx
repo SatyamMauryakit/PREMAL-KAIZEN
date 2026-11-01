@@ -2,16 +2,36 @@
 
 import { useCart } from '@/lib/cart-context';
 import { useCheckout } from '@/lib/checkout-context';
+import { useAuth } from '@/lib/auth-context';
 import { formatPrice } from '@/lib/pricing';
 import Link from 'next/link';
+import { useState } from 'react';
 
 export default function CartReview() {
   const { items } = useCart();
-  const { goToStep } = useCheckout();
+  const { goToStep, appliedCoupon, couponError, isApplyingCoupon, applyCoupon, removeCoupon } = useCheckout();
+  const { user } = useAuth();
+  const [couponInput, setCouponInput] = useState('');
+
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const discount = appliedCoupon?.discountAmount || 0;
+  const taxable = Math.max(0, subtotal - discount);
   const shipping = subtotal > 10000 ? 0 : 100;
-  const tax = Math.round(subtotal * 0.18);
-  const total = subtotal + shipping + tax;
+  const tax = Math.round(taxable * 0.18);
+  const total = taxable + tax + shipping;
+
+  const handleApplyCoupon = () => {
+    if (!couponInput.trim()) return;
+    if (!user) {
+      return;
+    }
+    applyCoupon(
+      couponInput.trim(),
+      user.id,
+      items.map((i) => ({ productId: i.productId, quantity: i.quantity, price: i.price })),
+      subtotal
+    );
+  };
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -41,11 +61,61 @@ export default function CartReview() {
         <div className="lg:col-span-1">
           <div className="bg-cream rounded-lg p-6 sticky top-24">
             <h3 className="text-lg font-bold text-black mb-4">Totals</h3>
+
+            {/* Voucher / Coupon */}
+            <div className="mb-6">
+              {!appliedCoupon ? (
+                <>
+                  {!user ? (
+                    <p className="text-xs text-gray-600 mb-2">
+                      <Link href="/auth/login" className="underline font-medium">Log in</Link> to apply a voucher code.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={couponInput}
+                          onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                          placeholder="Voucher code"
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm uppercase focus:outline-none focus:border-black"
+                        />
+                        <button
+                          onClick={handleApplyCoupon}
+                          disabled={isApplyingCoupon || !couponInput.trim()}
+                          className="px-4 py-2 border border-black text-black text-sm font-medium rounded hover:bg-black hover:text-cream transition-colors disabled:opacity-50"
+                        >
+                          {isApplyingCoupon ? '...' : 'Apply'}
+                        </button>
+                      </div>
+                      {couponError && <p className="text-xs text-red-600 mt-2">{couponError}</p>}
+                    </>
+                  )}
+                </>
+              ) : (
+                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-green-800">{appliedCoupon.code} applied</p>
+                    <p className="text-xs text-green-700">-{formatPrice(appliedCoupon.discountAmount)}</p>
+                  </div>
+                  <button onClick={removeCoupon} className="text-xs text-green-800 underline">
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-3 mb-6 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-700">Subtotal</span>
                 <span className="font-medium text-black">{formatPrice(subtotal)}</span>
               </div>
+              {discount > 0 && (
+                <div className="flex justify-between text-green-700">
+                  <span>Voucher discount</span>
+                  <span className="font-medium">-{formatPrice(discount)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-700">Shipping</span>
                 <span className="font-medium text-black">{shipping === 0 ? 'FREE' : formatPrice(shipping)}</span>

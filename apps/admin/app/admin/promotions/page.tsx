@@ -5,18 +5,36 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminPromotionsService, Promotion } from '@/lib/promotions-service';
 
+interface Stats {
+  totalVouchers: number;
+  active: number;
+  scheduled: number;
+  expired: number;
+  disabled: number;
+  totalRedemptions: number;
+  totalDiscountGranted: number;
+}
+
 export default function PromotionsPage() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadPromotions();
   }, [page, search, status]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('adminSessionToken');
+    if (!token) return;
+    adminPromotionsService.getStats(token).then(setStats).catch(() => setStats(null));
+  }, [promotions]);
 
   const loadPromotions = async () => {
     setIsLoading(true);
@@ -47,6 +65,28 @@ export default function PromotionsPage() {
       alert(err instanceof Error ? err.message : 'Failed to toggle promotion');
     }
   };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete voucher "${name}"? If it has been redeemed before, it will be archived instead of removed.`)) return;
+    setDeletingId(id);
+    try {
+      const token = localStorage.getItem('adminSessionToken');
+      if (!token) throw new Error('Not authenticated');
+      const result = await adminPromotionsService.deletePromotion(token, id);
+      if (result.archived) {
+        setPromotions(promotions.map(p => p.id === id ? { ...p, status: 'disabled', isActive: false } : p));
+        alert(result.message);
+      } else {
+        setPromotions(promotions.filter(p => p.id !== id));
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete promotion');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const formatPaise = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN')}`;
 
   const formatStatus = (status: string) => {
     return status.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -83,11 +123,27 @@ export default function PromotionsPage() {
   return (
     <div className="min-h-screen bg-gray-light">
       <Header
-        title="Promotions & Coupons"
+        title="Vouchers & Discounts"
         subtitle="Manage discounts, promotions, and coupon codes"
       />
 
       <div className="p-6">
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+          {[
+            { label: 'Total Vouchers', value: stats?.totalVouchers },
+            { label: 'Active', value: stats?.active },
+            { label: 'Scheduled', value: stats?.scheduled },
+            { label: 'Expired', value: stats?.expired },
+            { label: 'Redemptions', value: stats?.totalRedemptions },
+            { label: 'Discount Granted', value: stats ? formatPaise(stats.totalDiscountGranted) : undefined },
+          ].map((card) => (
+            <div key={card.label} className="bg-white rounded-lg border border-gray-light p-4">
+              <p className="text-xs text-gray-medium mb-1">{card.label}</p>
+              <p className="text-xl font-bold text-black">{card.value ?? (stats === null ? '—' : card.value)}</p>
+            </div>
+          ))}
+        </div>
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
             {error}
@@ -144,8 +200,11 @@ export default function PromotionsPage() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Type</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Value</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Min Order</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Max Cap</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Usage</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Per Customer</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Expiry</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Actions</th>
                   </tr>
@@ -163,7 +222,13 @@ export default function PromotionsPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm font-medium text-black">
-                        {promo.type === 'percentage' ? `${promo.value}%` : promo.type === 'fixed_amount' ? `₹${promo.value}` : '-'}
+                        {promo.type === 'percentage' ? `${promo.value}%` : promo.type === 'fixed_amount' ? formatPaise(promo.value || 0) : '-'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-dark">
+                        {promo.minSubtotal ? formatPaise(promo.minSubtotal) : '-'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-dark">
+                        {promo.maxDiscount ? formatPaise(promo.maxDiscount) : '-'}
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(promo.status)}`}>
@@ -172,6 +237,9 @@ export default function PromotionsPage() {
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-dark">
                         {promo.totalUsageLimit ? `${promo.usageCount}/${promo.totalUsageLimit}` : `${promo.usageCount}`}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-dark">
+                        {promo.perCustomerLimit ?? '-'}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-dark">
                         {promo.expiryDate ? new Date(promo.expiryDate).toLocaleDateString() : '-'}
@@ -188,6 +256,13 @@ export default function PromotionsPage() {
                           className="text-black hover:text-gray-dark font-medium"
                         >
                           {promo.isActive ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(promo.id, promo.name)}
+                          disabled={deletingId === promo.id}
+                          className="text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
+                        >
+                          {deletingId === promo.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </td>
                     </tr>

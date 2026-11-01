@@ -18,6 +18,7 @@ const navItems: NavItem[] = [
   { label: 'Categories', href: '/admin/categories', icon: Icons.Categories },
   { label: 'Inventory', href: '/admin/inventory', icon: Icons.Inventory },
   { label: 'Orders', href: '/admin/orders', icon: Icons.Orders },
+  { label: 'Vouchers & Discounts', href: '/admin/promotions', icon: Icons.Voucher },
   { label: 'Customers', href: '/admin/customers', icon: Icons.Customers },
   { label: 'Analytics', href: '/admin/analytics', icon: Icons.Analytics },
   { label: 'Settings', href: '/admin/settings', icon: Icons.Settings },

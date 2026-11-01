@@ -19,6 +19,11 @@ export interface CheckoutStep {
   isCompleted: boolean;
 }
 
+export interface AppliedCoupon {
+  code: string;
+  discountAmount: number;
+}
+
 interface CheckoutContextType {
   currentStep: 'cart' | 'information' | 'shipping' | 'payment' | 'review';
   shippingAddress: ShippingAddress | null;
@@ -29,9 +34,14 @@ interface CheckoutContextType {
   orderNotes: string;
   isLoading: boolean;
   error: string | null;
+  appliedCoupon: AppliedCoupon | null;
+  couponError: string | null;
+  isApplyingCoupon: boolean;
 
   // Actions
   goToStep: (step: 'cart' | 'information' | 'shipping' | 'payment' | 'review') => void;
+  applyCoupon: (code: string, userId: string, cartItems: Array<{ productId: string; quantity: number; price: number }>, subtotal: number) => Promise<void>;
+  removeCoupon: () => void;
   updateShippingAddress: (address: ShippingAddress) => void;
   updateBillingAddress: (address: ShippingAddress) => void;
   setSameAsBilling: (same: boolean) => void;
@@ -65,6 +75,9 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const [paymentMethod, setPaymentMethodState] = useState<'card' | 'upi' | 'netbanking' | 'cod' | null>(null);
   const [orderNotes, setOrderNotesState] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
 
   const goToStep = (step: 'cart' | 'information' | 'shipping' | 'payment' | 'review') => {
@@ -112,6 +125,40 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     setPaymentMethodState(null);
     setOrderNotesState('');
     setErrorState(null);
+    setAppliedCoupon(null);
+    setCouponError(null);
+  };
+
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+
+  const applyCoupon = async (
+    code: string,
+    userId: string,
+    cartItems: Array<{ productId: string; quantity: number; price: number }>,
+    subtotal: number
+  ) => {
+    setIsApplyingCoupon(true);
+    setCouponError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/promotions/validate-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ couponCode: code, userId, cartItems, subtotal }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Invalid coupon code');
+      setAppliedCoupon({ code: data.couponCode, discountAmount: data.discountAmount });
+    } catch (err) {
+      setCouponError(err instanceof Error ? err.message : 'Failed to apply coupon');
+      setAppliedCoupon(null);
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError(null);
   };
 
   const value: CheckoutContextType = {
@@ -124,6 +171,9 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     orderNotes,
     isLoading,
     error,
+    appliedCoupon,
+    couponError,
+    isApplyingCoupon,
     goToStep,
     updateShippingAddress,
     updateBillingAddress,
@@ -132,6 +182,8 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     setPaymentMethod,
     setOrderNotes,
     setError,
+    applyCoupon,
+    removeCoupon,
     resetCheckout,
   };
 

@@ -2,8 +2,9 @@
 
 import { Header } from '@/components/Header';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { adminPromotionsService } from '@/lib/promotions-service';
+import { adminCategoriesService, CategoryResponse } from '@/lib/products-service';
 import { useRouter } from 'next/navigation';
 
 const PROMOTION_TYPES = [
@@ -20,6 +21,7 @@ export default function CreatePromotionPage() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    code: '',
     type: 'percentage',
     value: '',
     maxDiscount: '',
@@ -30,6 +32,26 @@ export default function CreatePromotionPage() {
     perCustomerLimit: '',
     totalUsageLimit: '',
   });
+
+  const generateCode = () => {
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 8; i++) code += charset.charAt(Math.floor(Math.random() * charset.length));
+    setFormData((prev) => ({ ...prev, code }));
+  };
+
+  const [categories, setCategories] = useState<CategoryResponse[]>([]);
+  const [eligibleCategoryIds, setEligibleCategoryIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('adminSessionToken');
+    if (!token) return;
+    adminCategoriesService.getCategories(token).then((r) => setCategories(r.data)).catch(() => {});
+  }, []);
+
+  const toggleCategory = (id: string) => {
+    setEligibleCategoryIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target as any;
@@ -62,6 +84,8 @@ export default function CreatePromotionPage() {
       const payload: any = {
         name: formData.name,
         description: formData.description || null,
+        code: formData.code || null,
+        eligibleCategoryIds,
         type: formData.type,
         value: formData.type !== 'free_shipping' ? parseInt(formData.value) : null,
         maxDiscount: formData.maxDiscount ? parseInt(formData.maxDiscount) : null,
@@ -126,6 +150,30 @@ export default function CreatePromotionPage() {
               className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black"
               rows={3}
             />
+          </div>
+
+          {/* Voucher Code */}
+          <div>
+            <label className="block text-sm font-semibold text-black mb-2">Voucher Code</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                name="code"
+                value={formData.code}
+                onChange={handleInputChange}
+                placeholder="e.g., SUMMER20 (leave blank for an automatic discount with no code)"
+                className="flex-1 px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black uppercase"
+                maxLength={20}
+              />
+              <button
+                type="button"
+                onClick={generateCode}
+                className="px-4 py-2 border border-black text-black font-medium rounded hover:bg-black hover:text-white transition-colors text-sm whitespace-nowrap"
+              >
+                Generate
+              </button>
+            </div>
+            <p className="text-xs text-gray-medium mt-1">Customers enter this at checkout to apply the discount.</p>
           </div>
 
           {/* Type & Value */}
@@ -256,11 +304,39 @@ export default function CreatePromotionPage() {
             <p className="text-xs text-gray-medium mt-1">Check to limit this promotion to first-time customers</p>
           </div>
 
+          {/* Category Eligibility */}
+          <div>
+            <label className="block text-sm font-semibold text-black mb-2">Applicable Categories</label>
+            <p className="text-xs text-gray-medium mb-2">Leave none selected to apply to all products.</p>
+            {categories.length === 0 ? (
+              <p className="text-sm text-gray-medium">No categories yet.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {categories.map((cat) => (
+                  <label
+                    key={cat.id}
+                    className={`px-3 py-2 border rounded cursor-pointer text-sm flex items-center gap-2 ${
+                      eligibleCategoryIds.includes(cat.id) ? 'border-black bg-black text-white' : 'border-gray-light text-black'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={eligibleCategoryIds.includes(cat.id)}
+                      onChange={() => toggleCategory(cat.id)}
+                      className="sr-only"
+                    />
+                    {cat.name}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Info Box */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-900">
-              <strong>💡 Tip:</strong> Product and category restrictions can be added after creating the promotion.
-              Coupon codes can be generated individually.
+              <strong>💡 Tip:</strong> Per-product restrictions and bulk coupon-code generation are managed from the
+              voucher&apos;s edit page after it&apos;s created.
             </p>
           </div>
 

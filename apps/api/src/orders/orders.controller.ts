@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, BadRequestException, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -19,9 +19,12 @@ export class OrdersController {
     return this.ordersService.findById(id);
   }
 
+  // Requires login - an order must belong to a real account, and the user ID
+  // comes from the verified session, never from the request body.
+  @UseGuards(AuthGuard)
   @Post()
-  async create(@Body() createOrderDto: any) {
-    return this.ordersService.create(createOrderDto);
+  async create(@Body() createOrderDto: any, @Req() req: any) {
+    return this.ordersService.create(req.user.id, createOrderDto);
   }
 
   @UseGuards(AuthGuard, AdminGuard)

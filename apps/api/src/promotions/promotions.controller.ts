@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -6,6 +6,12 @@ import { AdminGuard } from '../common/guards/admin.guard';
 @Controller('api/promotions')
 export class PromotionsController {
   constructor(private promotionsService: PromotionsService) {}
+
+  @UseGuards(AuthGuard, AdminGuard)
+  @Get('stats')
+  async getStats() {
+    return this.promotionsService.getStats();
+  }
 
   @UseGuards(AuthGuard, AdminGuard)
   @Get()
@@ -38,6 +44,12 @@ export class PromotionsController {
   @Put(':id')
   async update(@Param('id') id: string, @Body() body: any) {
     return this.promotionsService.update(id, body);
+  }
+
+  @UseGuards(AuthGuard, AdminGuard)
+  @Delete(':id')
+  async delete(@Param('id') id: string) {
+    return this.promotionsService.delete(id);
   }
 
   @UseGuards(AuthGuard, AdminGuard)

@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PromotionsService } from '../promotions/promotions.service';
 
 const VALID_ORDER_STATUSES = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 const VALID_PAYMENT_STATUSES = ['pending', 'completed', 'failed', 'refunded'];
@@ -18,7 +19,7 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private promotionsService: PromotionsService) {}
 
   async findAll(filters?: {
     page?: number;
@@ -58,7 +59,7 @@ export class OrdersService {
         where: whereClause,
         skip,
         take: limit,
-        include: { items: true, user: true },
+        include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.order.count({ where: whereClause }),
@@ -75,7 +76,7 @@ export class OrdersService {
   async findById(id: string) {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: { items: { include: { product: true } }, user: true },
+      include: { items: { include: { product: true } }, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     if (!order) {
@@ -88,7 +89,7 @@ export class OrdersService {
   async findByOrderNumber(orderNumber: string) {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
-      include: { items: { include: { product: true } }, user: true },
+      include: { items: { include: { product: true } }, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     if (!order) {
@@ -98,36 +99,125 @@ export class OrdersService {
     return order;
   }
 
-  async create(data: any) {
-    if (!data.userId || data.total === undefined) {
-      throw new BadRequestException('userId and total are required');
+  /**
+   * Create a real order from the authenticated user's cart.
+   * Prices, stock existence, and the discount are all recomputed server-side
+   * from the database - the client only supplies product IDs, quantities,
+   * and an optional coupon code. Order + items + coupon redemption all
+   * commit (or roll back) together in one transaction.
+   */
+  async create(userId: string, data: any) {
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      throw new BadRequestException('At least one item is required');
     }
 
-    // Generate order number (e.g., PK-2024-001)
+    const lineItems: Array<{
+      productId: string;
+      quantity: number;
+      price: number;
+      categoryId: string | null;
+      selectedSize: string | null;
+      selectedColor: string | null;
+    }> = [];
+
+    for (const item of data.items) {
+      const quantity = Number(item.quantity);
+      if (!item.productId || !Number.isInteger(quantity) || quantity < 1) {
+        throw new BadRequestException('Each item needs a productId and a positive integer quantity');
+      }
+
+      const product = await this.prisma.product.findUnique({ where: { id: item.productId } });
+      if (!product || !product.isActive) {
+        throw new BadRequestException(`Product ${item.productId} is not available for purchase`);
+      }
+
+      lineItems.push({
+        productId: product.id,
+        quantity,
+        price: product.price, // server-authoritative price, never trust the client's
+        categoryId: product.categoryId,
+        selectedSize: item.selectedSize || null,
+        selectedColor: item.selectedColor || null,
+      });
+    }
+
+    const subtotal = lineItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+    let discount = 0;
+    let promotionId: string | null = null;
+    let couponCode: string | null = null;
+
+    if (data.couponCode) {
+      const eligibilityItems = lineItems.map((i) => ({
+        productId: i.productId,
+        categoryId: i.categoryId || undefined,
+        quantity: i.quantity,
+        price: i.price,
+      }));
+      const discountCalc = await this.promotionsService.validateAndApplyCoupon(
+        data.couponCode,
+        userId,
+        eligibilityItems,
+        subtotal
+      );
+      discount = discountCalc.discountAmount;
+      promotionId = discountCalc.promotionId || null;
+      couponCode = discountCalc.couponCode || null;
+    }
+
+    const taxableAmount = Math.max(0, subtotal - discount);
+    const tax = Math.round(taxableAmount * 0.18);
+    const shipping = subtotal > 10000 ? 0 : 100;
+    const total = taxableAmount + tax + shipping;
+
     const timestamp = new Date();
     const year = timestamp.getFullYear();
     const random = Math.floor(Math.random() * 100000).toString().padStart(6, '0');
     const orderNumber = `PK-${year}-${random}`;
 
-    const order = await this.prisma.order.create({
-      data: {
-        userId: data.userId,
-        orderNumber,
-        status: data.status || 'pending',
-        paymentStatus: data.paymentStatus || 'pending',
-        paymentMethod: data.paymentMethod || 'cod',
-        shippingMethod: data.shippingMethod || 'standard',
-        subtotal: data.subtotal || 0,
-        shipping: data.shipping || 0,
-        tax: data.tax || 0,
-        total: Math.round(data.total),
-        notes: data.notes || null,
-        addressId: data.addressId || null,
-      },
-      include: { items: true, user: true },
+    const PAYMENT_METHODS = ['card', 'upi', 'netbanking', 'cod'];
+    const SHIPPING_METHODS = ['standard', 'express', 'overnight'];
+    const paymentMethod = PAYMENT_METHODS.includes(data.paymentMethod) ? data.paymentMethod : 'cod';
+    const shippingMethod = SHIPPING_METHODS.includes(data.shippingMethod) ? data.shippingMethod : 'standard';
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.order.create({
+        data: {
+          userId,
+          orderNumber,
+          status: 'pending',
+          paymentStatus: 'pending',
+          paymentMethod,
+          shippingMethod,
+          subtotal,
+          discount,
+          shipping,
+          tax,
+          total,
+          promotionId,
+          couponCode,
+          notes: data.notes || null,
+          addressId: data.addressId || null,
+          items: {
+            create: lineItems.map((i) => ({
+              productId: i.productId,
+              quantity: i.quantity,
+              price: i.price,
+              selectedSize: i.selectedSize,
+              selectedColor: i.selectedColor,
+            })),
+          },
+        },
+      });
+
+      if (couponCode) {
+        await this.promotionsService.redeemCouponInTx(tx, couponCode, userId, created.id, discount);
+      }
+
+      return created;
     });
 
-    return order;
+    return this.findById(order.id);
   }
 
   async updateStatus(id: string, newStatus: string) {
@@ -155,7 +245,7 @@ export class OrdersService {
         status: newStatus,
         updatedAt: new Date(),
       },
-      include: { items: true, user: true },
+      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;
@@ -178,7 +268,7 @@ export class OrdersService {
         paymentStatus,
         updatedAt: new Date(),
       },
-      include: { items: true, user: true },
+      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;
@@ -199,7 +289,7 @@ export class OrdersService {
         estimatedDelivery: data.estimatedDelivery || order.estimatedDelivery,
         updatedAt: new Date(),
       },
-      include: { items: true, user: true },
+      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;
@@ -218,7 +308,7 @@ export class OrdersService {
         internalNotes: notes,
         updatedAt: new Date(),
       },
-      include: { items: true, user: true },
+      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;

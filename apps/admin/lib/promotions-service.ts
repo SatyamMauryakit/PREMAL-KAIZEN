@@ -158,6 +158,34 @@ export const adminPromotionsService = {
     return response.json();
   },
 
+  async getStats(token: string): Promise<{
+    totalVouchers: number;
+    active: number;
+    scheduled: number;
+    expired: number;
+    disabled: number;
+    totalRedemptions: number;
+    totalDiscountGranted: number;
+  }> {
+    const response = await fetch(`${API_BASE}/api/promotions/stats`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error('Failed to fetch voucher stats');
+    return response.json();
+  },
+
+  async deletePromotion(token: string, id: string): Promise<{ success: boolean; archived: boolean; message: string }> {
+    const response = await fetch(`${API_BASE}/api/promotions/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to delete promotion');
+    }
+    return response.json();
+  },
+
   async validateCoupon(
     token: string,
     couponCode: string,

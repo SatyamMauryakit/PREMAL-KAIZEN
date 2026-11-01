@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "browser-qa": {
+      "source": "c0x12c/ai-toolkit",
+      "sourceType": "github",
+      "skillPath": ".codex/skills/browser-qa/SKILL.md",
+      "computedHash": "ad7b798f7d4110ced6965840f2e2dd0e82b5d4654da53a0fdd6d1421ca243f50"
+    },
     "context-summarizer": {
       "source": "mikewolfli/go-on",
       "sourceType": "github",

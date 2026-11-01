@@ -13,18 +13,20 @@ import PaymentForm from '@/components/checkout/PaymentForm';
 import OrderReview from '@/components/checkout/OrderReview';
 
 export default function CheckoutPage() {
-  const { items } = useCart();
+  const { items, isHydrated } = useCart();
   const { currentStep, goToStep, error, isLoading } = useCheckout();
   const { user } = useAuth();
 
   useEffect(() => {
-    if (items.length === 0) {
-      // Redirect to cart if empty
+    // Wait for the cart to finish restoring from localStorage before deciding
+    // it's empty - otherwise a direct page load/refresh always sees the
+    // initial empty array and bounces a customer with real items back to /cart.
+    if (isHydrated && items.length === 0) {
       window.location.href = '/cart';
     }
-  }, [items]);
+  }, [items, isHydrated]);
 
-  if (items.length === 0) {
+  if (!isHydrated || items.length === 0) {
     return null;
   }
 

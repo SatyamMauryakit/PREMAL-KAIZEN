@@ -1,4 +1,10 @@
 export const Icons = {
+  Voucher: ({ className = 'w-5 h-5' }) => (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor">
+      <path d="M20 12c0-1.1.9-2 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-1.99.9-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2zm-9 4.5h-2v-2h2v2zm0-4.25h-2v-2h2v2zm0-4.25h-2v-2h2v2z" />
+    </svg>
+  ),
+
   Dashboard: ({ className = 'w-5 h-5' }) => (
     <svg viewBox="0 0 24 24" className={className} fill="currentColor">
       <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />

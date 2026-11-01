@@ -4,6 +4,7 @@ import { Header } from '@/components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminPromotionsService, Promotion } from '@/lib/promotions-service';
+import { adminCategoriesService, CategoryResponse } from '@/lib/products-service';
 import { useRouter } from 'next/navigation';
 
 const PROMOTION_TYPES = [
@@ -24,9 +25,13 @@ export default function EditPromotionPage({ params }: PageProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [promotion, setPromotion] = useState<Promotion | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [categories, setCategories] = useState<CategoryResponse[]>([]);
+  const [eligibleCategoryIds, setEligibleCategoryIds] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    code: '',
     type: 'percentage',
     value: '',
     maxDiscount: '',
@@ -38,6 +43,10 @@ export default function EditPromotionPage({ params }: PageProps) {
     totalUsageLimit: '',
   });
 
+  const toggleCategory = (id: string) => {
+    setEligibleCategoryIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
+  };
+
   useEffect(() => {
     params.then(p => setResolvedParams(p));
   }, [params]);
@@ -45,6 +54,10 @@ export default function EditPromotionPage({ params }: PageProps) {
   useEffect(() => {
     if (resolvedParams?.id) {
       loadPromotion();
+    }
+    const token = localStorage.getItem('adminSessionToken');
+    if (token) {
+      adminCategoriesService.getCategories(token).then((r) => setCategories(r.data)).catch(() => {});
     }
   }, [resolvedParams?.id]);
 
@@ -56,9 +69,11 @@ export default function EditPromotionPage({ params }: PageProps) {
 
       const data = await adminPromotionsService.getPromotion(token, resolvedParams!.id);
       setPromotion(data);
+      setEligibleCategoryIds(data.eligibleCategoryIds || []);
       setFormData({
         name: data.name,
         description: data.description || '',
+        code: data.code || '',
         type: data.type,
         value: data.value?.toString() || '',
         maxDiscount: data.maxDiscount?.toString() || '',
@@ -103,6 +118,8 @@ export default function EditPromotionPage({ params }: PageProps) {
       const payload: any = {
         name: formData.name,
         description: formData.description || null,
+        code: formData.code || null,
+        eligibleCategoryIds,
         type: formData.type,
         value: formData.type !== 'free_shipping' ? parseInt(formData.value) : null,
         maxDiscount: formData.maxDiscount ? parseInt(formData.maxDiscount) : null,
@@ -120,6 +137,21 @@ export default function EditPromotionPage({ params }: PageProps) {
       setError(err instanceof Error ? err.message : 'Failed to update promotion');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!promotion || !confirm(`Delete voucher "${promotion.name}"? If it has redemption history, it will be archived instead.`)) return;
+    setIsDeleting(true);
+    try {
+      const token = localStorage.getItem('adminSessionToken');
+      if (!token) throw new Error('Not authenticated');
+      const result = await adminPromotionsService.deletePromotion(token, resolvedParams!.id);
+      alert(result.message);
+      router.push('/admin/promotions');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete promotion');
+      setIsDeleting(false);
     }
   };
 
@@ -189,6 +221,48 @@ export default function EditPromotionPage({ params }: PageProps) {
               className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black"
               rows={3}
             />
+          </div>
+
+          {/* Voucher Code */}
+          <div>
+            <label className="block text-sm font-semibold text-black mb-2">Voucher Code</label>
+            <input
+              type="text"
+              name="code"
+              value={formData.code}
+              onChange={handleInputChange}
+              placeholder="Leave blank for an automatic discount with no code"
+              className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black uppercase"
+              maxLength={20}
+            />
+          </div>
+
+          {/* Category Eligibility */}
+          <div>
+            <label className="block text-sm font-semibold text-black mb-2">Applicable Categories</label>
+            <p className="text-xs text-gray-medium mb-2">Leave none selected to apply to all products.</p>
+            {categories.length === 0 ? (
+              <p className="text-sm text-gray-medium">No categories yet.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {categories.map((cat) => (
+                  <label
+                    key={cat.id}
+                    className={`px-3 py-2 border rounded cursor-pointer text-sm flex items-center gap-2 ${
+                      eligibleCategoryIds.includes(cat.id) ? 'border-black bg-black text-white' : 'border-gray-light text-black'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={eligibleCategoryIds.includes(cat.id)}
+                      onChange={() => toggleCategory(cat.id)}
+                      className="sr-only"
+                    />
+                    {cat.name}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Type & Value */}
@@ -340,6 +414,14 @@ export default function EditPromotionPage({ params }: PageProps) {
               className="flex-1 px-6 py-3 border border-black text-black font-semibold rounded hover:bg-black hover:text-white transition-colors"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="px-6 py-3 text-red-600 font-semibold rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
             </button>
           </div>
         </form>

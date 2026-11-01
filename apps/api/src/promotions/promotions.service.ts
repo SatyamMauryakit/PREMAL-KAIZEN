@@ -139,6 +139,25 @@ export class PromotionsService {
       throw new BadRequestException('A promotion with this name already exists');
     }
 
+    // Validate discount cap / minimum order sanity
+    if (data.maxDiscount !== undefined && data.maxDiscount !== null && data.maxDiscount < 0) {
+      throw new BadRequestException('Max discount cap cannot be negative');
+    }
+    if (data.minSubtotal !== undefined && data.minSubtotal !== null && data.minSubtotal < 0) {
+      throw new BadRequestException('Minimum order amount cannot be negative');
+    }
+    if (data.startDate && data.expiryDate && new Date(data.startDate) > new Date(data.expiryDate)) {
+      throw new BadRequestException('Start date must be before expiry date');
+    }
+
+    if (data.code) {
+      const existingCode = await this.prisma.couponCode.findUnique({ where: { code: data.code.toUpperCase() } });
+      const existingPromoCode = await this.prisma.promotion.findFirst({ where: { code: data.code.toUpperCase() } });
+      if (existingCode || existingPromoCode) {
+        throw new BadRequestException('This voucher code is already in use');
+      }
+    }
+
     const promotion = await this.prisma.promotion.create({
       data: {
         name: data.name,
@@ -161,6 +180,15 @@ export class PromotionsService {
       },
     });
 
+    // Redemption (validate-coupon/redeem) only ever looks at the CouponCode
+    // table, so a promotion's own `code` needs a matching row there to
+    // actually be redeemable - otherwise setting it here would silently do nothing.
+    if (promotion.code) {
+      await this.prisma.couponCode.create({
+        data: { code: promotion.code, promotionId: promotion.id },
+      });
+    }
+
     return {
       ...this.deserializePromotion(promotion),
       status: this.getPromotionStatus(promotion),
@@ -182,6 +210,20 @@ export class PromotionsService {
       if (existing) {
         throw new BadRequestException('A promotion with this name already exists');
       }
+    }
+
+    if (data.code && data.code.toUpperCase() !== promotion.code) {
+      const existingCode = await this.prisma.couponCode.findUnique({ where: { code: data.code.toUpperCase() } });
+      const existingPromoCode = await this.prisma.promotion.findFirst({ where: { code: data.code.toUpperCase(), id: { not: id } } });
+      if (existingCode || existingPromoCode) {
+        throw new BadRequestException('This voucher code is already in use');
+      }
+    }
+
+    const nextStart = data.startDate ? new Date(data.startDate) : promotion.startDate;
+    const nextExpiry = data.expiryDate ? new Date(data.expiryDate) : promotion.expiryDate;
+    if (nextStart && nextExpiry && nextStart > nextExpiry) {
+      throw new BadRequestException('Start date must be before expiry date');
     }
 
     const updated = await this.prisma.promotion.update({
@@ -207,6 +249,17 @@ export class PromotionsService {
       },
     });
 
+    // Keep the backing CouponCode row in sync so a newly set/changed code is
+    // actually redeemable (see the same note in create()).
+    if (updated.code) {
+      const linkedCode = await this.prisma.couponCode.findUnique({ where: { code: updated.code } });
+      if (!linkedCode) {
+        await this.prisma.couponCode.create({
+          data: { code: updated.code, promotionId: updated.id },
+        });
+      }
+    }
+
     return {
       ...this.deserializePromotion(updated),
       status: this.getPromotionStatus(updated),
@@ -230,6 +283,55 @@ export class PromotionsService {
     return {
       ...updated,
       status: this.getPromotionStatus(updated),
+    };
+  }
+
+  /**
+   * Delete a promotion. Safe: if it has never been redeemed, hard-delete it
+   * (and its coupon codes, via cascade). If it has real redemption history,
+   * archive it instead so order history/analytics referencing it stay intact.
+   */
+  async delete(id: string) {
+    const promotion = await this.prisma.promotion.findUnique({ where: { id } });
+    if (!promotion) {
+      throw new NotFoundException(`Promotion with ID ${id} not found`);
+    }
+
+    if (promotion.usageCount > 0) {
+      await this.prisma.promotion.update({
+        where: { id },
+        data: { isArchived: true, isActive: false },
+      });
+      return { success: true, archived: true, message: 'Voucher has redemption history, so it was archived instead of deleted.' };
+    }
+
+    await this.prisma.promotion.delete({ where: { id } });
+    return { success: true, archived: false, message: 'Voucher deleted successfully' };
+  }
+
+  /**
+   * Real, database-backed stats for the admin vouchers dashboard.
+   */
+  async getStats() {
+    const promotions = await this.prisma.promotion.findMany({ where: { isArchived: false } });
+    const statuses = promotions.map((p) => this.getPromotionStatus(p));
+
+    const [totalRedemptions, discountAgg] = await Promise.all([
+      this.prisma.couponRedemption.count({ where: { status: 'completed' } }),
+      this.prisma.couponRedemption.aggregate({
+        where: { status: 'completed' },
+        _sum: { discountAmount: true },
+      }),
+    ]);
+
+    return {
+      totalVouchers: promotions.length,
+      active: statuses.filter((s) => s === 'active').length,
+      scheduled: statuses.filter((s) => s === 'scheduled').length,
+      expired: statuses.filter((s) => s === 'expired').length,
+      disabled: statuses.filter((s) => s === 'disabled').length,
+      totalRedemptions,
+      totalDiscountGranted: discountAgg._sum.discountAmount || 0,
     };
   }
 
@@ -340,66 +442,74 @@ export class PromotionsService {
     orderId: string,
     discountAmount: number
   ) {
+    return this.prisma.$transaction((tx) =>
+      this.redeemCouponInTx(tx, couponCode, userId, orderId, discountAmount)
+    );
+  }
+
+  /**
+   * Core redemption logic, usable both standalone (wrapped in its own
+   * transaction by redeemCoupon above) and inlined into a caller's own
+   * transaction (e.g. OrdersService creating the order and redeeming the
+   * coupon atomically in one go). Re-checks usage limits against the live
+   * row inside the transaction - SQLite serializes writers, so this closes
+   * the race window between validate-coupon and redeem where two concurrent
+   * checkouts could both pass validation against the same "slot" and both
+   * redeem, exceeding the limit.
+   */
+  async redeemCouponInTx(
+    tx: any,
+    couponCode: string,
+    userId: string,
+    orderId: string,
+    discountAmount: number
+  ) {
     const normalizedCode = couponCode.toUpperCase().trim();
 
-    const coupon = await this.prisma.couponCode.findUnique({
+    const coupon = await tx.couponCode.findUnique({
       where: { code: normalizedCode },
       include: { promotion: true },
     });
-
     if (!coupon) {
       throw new BadRequestException('Coupon not found');
     }
 
-    // Use transaction to ensure atomicity
-    const result = await this.prisma.$transaction(async (tx) => {
-      // Check if already redeemed (idempotency)
-      const existing = await tx.couponRedemption.findFirst({
-        where: {
-          couponCodeId: coupon.id,
-          userId,
-          orderId,
-        },
-      });
+    // Check if already redeemed (idempotency)
+    const existing = await tx.couponRedemption.findFirst({
+      where: { couponCodeId: coupon.id, userId, orderId },
+    });
+    if (existing) {
+      return existing;
+    }
 
-      if (existing) {
-        return existing; // Already redeemed, return existing
-      }
+    if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
+      throw new BadRequestException('This coupon code has reached its usage limit');
+    }
+    if (coupon.promotion.totalUsageLimit && coupon.promotion.usageCount >= coupon.promotion.totalUsageLimit) {
+      throw new BadRequestException('This promotion has reached its usage limit');
+    }
 
-      // Create redemption record
-      const redemption = await tx.couponRedemption.create({
-        data: {
-          couponCodeId: coupon.id,
-          userId,
-          orderId,
-          status: 'completed',
-          discountAmount,
-        },
-      });
-
-      // Increment usage counts
-      await tx.couponCode.update({
-        where: { id: coupon.id },
-        data: {
-          usageCount: {
-            increment: 1,
-          },
-        },
-      });
-
-      await tx.promotion.update({
-        where: { id: coupon.promotionId },
-        data: {
-          usageCount: {
-            increment: 1,
-          },
-        },
-      });
-
-      return redemption;
+    const redemption = await tx.couponRedemption.create({
+      data: {
+        couponCodeId: coupon.id,
+        userId,
+        orderId,
+        status: 'completed',
+        discountAmount,
+      },
     });
 
-    return result;
+    await tx.couponCode.update({
+      where: { id: coupon.id },
+      data: { usageCount: { increment: 1 } },
+    });
+
+    await tx.promotion.update({
+      where: { id: coupon.promotionId },
+      data: { usageCount: { increment: 1 } },
+    });
+
+    return redemption;
   }
 
   /**
