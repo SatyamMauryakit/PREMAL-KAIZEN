@@ -1,6 +1,9 @@
-import { Controller, Get, Put, Param, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
 import { CustomerAdminService } from './customer-admin.service';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
+@UseGuards(AuthGuard, AdminGuard)
 @Controller('api/admin/customers')
 export class CustomerAdminController {
   constructor(private customerAdminService: CustomerAdminService) {}

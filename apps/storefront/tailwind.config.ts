@@ -6,6 +6,7 @@ export default {
     './components/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
+    extend: {
     colors: {
       transparent: 'transparent',
       black: '#000000',
@@ -21,7 +22,7 @@ export default {
       'beige-light': '#E8DDD4',
       'gray-dark': '#333333',
       'gray-medium': '#666666',
-      'gray-light': '#999999',
+      'gray-light': '#E5E5E5',
       'gray-50': '#F9FAFB',
       'gray-100': '#F3F4F6',
       'gray-200': '#E5E7EB',
@@ -78,6 +79,7 @@ export default {
       '2xl': '16px',
       '3xl': '20px',
       full: '9999px',
+    },
     },
   },
   plugins: [],

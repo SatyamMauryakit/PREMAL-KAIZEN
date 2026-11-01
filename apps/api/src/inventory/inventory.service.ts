@@ -30,8 +30,8 @@ export class InventoryService {
 
     if (filters?.search) {
       whereClause.OR = [
-        { product: { name: { contains: filters.search, mode: 'insensitive' } } },
-        { product: { sku: { contains: filters.search, mode: 'insensitive' } } },
+        { product: { name: { contains: filters.search } } },
+        { product: { sku: { contains: filters.search } } },
       ];
     }
 
@@ -120,21 +120,20 @@ export class InventoryService {
   async getLowStockItems(threshold?: number) {
     const limit = threshold || 10;
 
-    const lowStock = await this.prisma.inventory.findMany({
-      where: {
-        AND: [
-          { onHand: { gt: 0 } },
-          { onHand: { lte: { field: 'reorderThreshold' } } },
-        ],
-      },
+    // SQLite connector doesn't support comparing one column to another
+    // (field references) in a where filter, so fetch candidates and compare in JS.
+    const lowStockCandidates = await this.prisma.inventory.findMany({
+      where: { onHand: { gt: 0 } },
       include: {
         product: {
           include: { category: true },
         },
       },
       orderBy: { onHand: 'asc' },
-      take: 50,
     });
+    const lowStock = lowStockCandidates
+      .filter((inv) => inv.onHand <= inv.reorderThreshold)
+      .slice(0, 50);
 
     const outOfStock = await this.prisma.inventory.findMany({
       where: { onHand: { lte: 0 } },
@@ -201,7 +200,7 @@ export class InventoryService {
     };
 
     let inventory = await this.prisma.inventory.findUnique({
-      where: whereClause,
+      where: whereClause as any,
       include: { product: true },
     });
 
@@ -298,7 +297,7 @@ export class InventoryService {
           productId,
           size: size || null,
           color: color || null,
-        },
+        } as any,
       },
     });
 
@@ -347,7 +346,7 @@ export class InventoryService {
           productId,
           size: size || null,
           color: color || null,
-        },
+        } as any,
       },
     });
 
@@ -452,7 +451,7 @@ export class InventoryService {
           productId,
           size: size || null,
           color: color || null,
-        },
+        } as any,
       },
       data: { reorderThreshold: threshold },
       include: {
@@ -481,8 +480,11 @@ export class InventoryService {
       throw new NotFoundException('Product not found');
     }
 
+    const colors = this.safeParseArray(product.colors);
+    const sizes = this.safeParseArray(product.sizes);
+
     // For products without variants, create one inventory record
-    if (!product.colors.length && !product.sizes.length) {
+    if (!colors.length && !sizes.length) {
       return this.prisma.inventory.create({
         data: {
           productId,
@@ -497,8 +499,8 @@ export class InventoryService {
 
     // For products with variants, create records for each combination
     const variants: any[] = [];
-    for (const color of product.colors.length ? product.colors : [null]) {
-      for (const size of product.sizes.length ? product.sizes : [null]) {
+    for (const color of colors.length ? colors : [null]) {
+      for (const size of sizes.length ? sizes : [null]) {
         variants.push({
           productId,
           size,
@@ -510,10 +512,29 @@ export class InventoryService {
       }
     }
 
-    return this.prisma.inventory.createMany({
-      data: variants,
-      skipDuplicates: true,
-    });
+    // SQLite doesn't support skipDuplicates; create each record individually
+    // and ignore ones that already exist for this product/size/color.
+    const created: any[] = [];
+    for (const variant of variants) {
+      try {
+        created.push(await this.prisma.inventory.create({ data: variant }));
+      } catch {
+        // Unique constraint violation - variant already initialized, skip it.
+      }
+    }
+
+    return { count: created.length };
+  }
+
+  private safeParseArray(value: unknown): string[] {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   private getInventoryStatus(inventory: any): string {

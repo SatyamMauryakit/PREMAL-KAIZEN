@@ -1,10 +1,13 @@
-import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
 @Controller('api/promotions')
 export class PromotionsController {
   constructor(private promotionsService: PromotionsService) {}
 
+  @UseGuards(AuthGuard, AdminGuard)
   @Get()
   async findAll(@Query() query: any) {
     return this.promotionsService.findAll({
@@ -16,11 +19,13 @@ export class PromotionsController {
     });
   }
 
+  @UseGuards(AuthGuard, AdminGuard)
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.promotionsService.findById(id);
   }
 
+  @UseGuards(AuthGuard, AdminGuard)
   @Post()
   async create(@Body() body: any) {
     if (!body.name || !body.type) {
@@ -29,11 +34,13 @@ export class PromotionsController {
     return this.promotionsService.create(body);
   }
 
+  @UseGuards(AuthGuard, AdminGuard)
   @Put(':id')
   async update(@Param('id') id: string, @Body() body: any) {
     return this.promotionsService.update(id, body);
   }
 
+  @UseGuards(AuthGuard, AdminGuard)
   @Put(':id/toggle')
   async toggleActive(@Param('id') id: string, @Body() body: any) {
     if (body.isActive === undefined) {
@@ -42,6 +49,7 @@ export class PromotionsController {
     return this.promotionsService.toggleActive(id, body.isActive);
   }
 
+  @UseGuards(AuthGuard, AdminGuard)
   @Post(':id/coupons')
   async createCouponCodes(
     @Param('id') promotionId: string,

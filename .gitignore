@@ -42,3 +42,9 @@ temp/
 # OS
 Thumbs.db
 .DS_Store
+
+# Local uploaded product images (local dev only)
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal

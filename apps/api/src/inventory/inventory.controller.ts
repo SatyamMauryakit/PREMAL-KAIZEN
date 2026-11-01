@@ -1,6 +1,12 @@
-import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
+/**
+ * Inventory is an admin-only module - all endpoints require an authenticated admin.
+ */
+@UseGuards(AuthGuard, AdminGuard)
 @Controller('api/inventory')
 export class InventoryController {
   constructor(private inventoryService: InventoryService) {}

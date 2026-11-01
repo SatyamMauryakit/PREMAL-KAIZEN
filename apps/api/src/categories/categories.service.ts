@@ -10,8 +10,8 @@ export class CategoriesService {
 
     if (filters?.search) {
       whereClause.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { slug: { contains: filters.search, mode: 'insensitive' } },
+        { name: { contains: filters.search } },
+        { slug: { contains: filters.search } },
       ];
     }
 

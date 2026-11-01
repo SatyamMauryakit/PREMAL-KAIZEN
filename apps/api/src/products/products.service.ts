@@ -9,6 +9,10 @@ import { PrismaService } from '../prisma/prisma.service';
  * - Product categories
  * - Product images and metadata
  *
+ * Note: `colors` and `sizes` are stored as JSON-encoded strings in SQLite
+ * (no native array/json column type) and are parsed back into arrays
+ * before being returned from this service.
+ *
  * Service boundary: All product queries and mutations go through this service.
  * External access: Via REST API (/api/products)
  */
@@ -36,8 +40,8 @@ export class ProductsService {
 
     if (filters?.search) {
       whereClause.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { description: { contains: filters.search, mode: 'insensitive' } },
+        { name: { contains: filters.search } },
+        { description: { contains: filters.search } },
       ];
     }
 
@@ -46,14 +50,14 @@ export class ProductsService {
         where: whereClause,
         skip,
         take: limit,
-        include: { category: true, images: true },
+        include: { category: true, images: { orderBy: { order: 'asc' } } },
         orderBy: this.getOrderBy(filters?.sort),
       }),
       this.prisma.product.count({ where: whereClause }),
     ]);
 
     return {
-      data: products,
+      data: products.map((p) => this.deserialize(p)),
       total,
       page,
       pageSize: limit,
@@ -68,14 +72,14 @@ export class ProductsService {
   async findById(id: string) {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: { category: true, images: true },
+      include: { category: true, images: { orderBy: { order: 'asc' } } },
     });
 
     if (!product) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
 
-    return product;
+    return this.deserialize(product);
   }
 
   /**
@@ -88,27 +92,41 @@ export class ProductsService {
       throw new BadRequestException('Name, SKU, and price are required');
     }
 
+    const price = Math.round(Number(data.price));
+    if (!Number.isFinite(price) || price < 0) {
+      throw new BadRequestException('Price must be a valid non-negative number');
+    }
+
     const existingSku = await this.prisma.product.findUnique({ where: { sku: data.sku } });
     if (existingSku) {
       throw new BadRequestException('SKU already exists');
     }
+
+    const images = Array.isArray(data.images) ? data.images : [];
 
     const product = await this.prisma.product.create({
       data: {
         name: data.name,
         description: data.description || '',
         sku: data.sku,
-        price: Math.round(data.price),
-        originalPrice: data.originalPrice ? Math.round(data.originalPrice) : null,
+        price,
+        originalPrice: data.originalPrice ? Math.round(Number(data.originalPrice)) : null,
         categoryId: data.categoryId || null,
         isActive: data.isActive !== false,
-        colors: data.colors || [],
-        sizes: data.sizes || [],
+        colors: JSON.stringify(Array.isArray(data.colors) ? data.colors : []),
+        sizes: JSON.stringify(Array.isArray(data.sizes) ? data.sizes : []),
+        images: {
+          create: images.map((img: any, index: number) => ({
+            url: img.url,
+            alt: img.alt || data.name,
+            order: img.order ?? index,
+          })),
+        },
       },
-      include: { category: true, images: true },
+      include: { category: true, images: { orderBy: { order: 'asc' } } },
     });
 
-    return product;
+    return this.deserialize(product);
   }
 
   /**
@@ -130,23 +148,49 @@ export class ProductsService {
       }
     }
 
+    let price = product.price;
+    if (data.price !== undefined) {
+      price = Math.round(Number(data.price));
+      if (!Number.isFinite(price) || price < 0) {
+        throw new BadRequestException('Price must be a valid non-negative number');
+      }
+    }
+
     const updated = await this.prisma.product.update({
       where: { id },
       data: {
-        name: data.name || product.name,
+        name: data.name ?? product.name,
         description: data.description !== undefined ? data.description : product.description,
-        sku: data.sku || product.sku,
-        price: data.price !== undefined ? Math.round(data.price) : product.price,
-        originalPrice: data.originalPrice !== undefined ? Math.round(data.originalPrice) : product.originalPrice,
+        sku: data.sku ?? product.sku,
+        price,
+        originalPrice: data.originalPrice !== undefined ? Math.round(Number(data.originalPrice)) : product.originalPrice,
         categoryId: data.categoryId !== undefined ? data.categoryId : product.categoryId,
         isActive: data.isActive !== undefined ? data.isActive : product.isActive,
-        colors: data.colors || product.colors,
-        sizes: data.sizes || product.sizes,
+        colors: Array.isArray(data.colors) ? JSON.stringify(data.colors) : product.colors,
+        sizes: Array.isArray(data.sizes) ? JSON.stringify(data.sizes) : product.sizes,
       },
-      include: { category: true, images: true },
+      include: { category: true, images: { orderBy: { order: 'asc' } } },
     });
 
-    return updated;
+    // Replace images only when a new image set is explicitly provided
+    if (Array.isArray(data.images)) {
+      await this.prisma.productImage.deleteMany({ where: { productId: id } });
+      await this.prisma.productImage.createMany({
+        data: data.images.map((img: any, index: number) => ({
+          productId: id,
+          url: img.url,
+          alt: img.alt || updated.name,
+          order: img.order ?? index,
+        })),
+      });
+    }
+
+    const final = await this.prisma.product.findUnique({
+      where: { id },
+      include: { category: true, images: { orderBy: { order: 'asc' } } },
+    });
+
+    return this.deserialize(final);
   }
 
   /**
@@ -163,18 +207,41 @@ export class ProductsService {
     return { success: true, message: 'Product deleted successfully' };
   }
 
+  /**
+   * Parse JSON-encoded colors/sizes back into arrays for API responses
+   */
+  private deserialize(product: any) {
+    if (!product) return product;
+    return {
+      ...product,
+      colors: this.safeParseArray(product.colors),
+      sizes: this.safeParseArray(product.sizes),
+    };
+  }
+
+  private safeParseArray(value: unknown): string[] {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
   private getOrderBy(sort?: string) {
     switch (sort) {
       case 'price_asc':
-        return { price: 'asc' };
+        return { price: 'asc' as const };
       case 'price_desc':
-        return { price: 'desc' };
+        return { price: 'desc' as const };
       case 'newest':
-        return { createdAt: 'desc' };
+        return { createdAt: 'desc' as const };
       case 'oldest':
-        return { createdAt: 'asc' };
+        return { createdAt: 'asc' as const };
       default:
-        return { createdAt: 'desc' };
+        return { createdAt: 'desc' as const };
     }
   }
 }

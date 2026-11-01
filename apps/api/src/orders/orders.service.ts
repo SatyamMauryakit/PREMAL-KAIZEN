@@ -44,8 +44,8 @@ export class OrdersService {
 
     if (filters?.search) {
       whereClause.OR = [
-        { orderNumber: { contains: filters.search, mode: 'insensitive' } },
-        { user: { email: { contains: filters.search, mode: 'insensitive' } } },
+        { orderNumber: { contains: filters.search } },
+        { user: { email: { contains: filters.search } } },
       ];
     }
 

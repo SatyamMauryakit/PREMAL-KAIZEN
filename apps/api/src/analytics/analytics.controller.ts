@@ -1,6 +1,9 @@
-import { Controller, Get, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, BadRequestException, UseGuards } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
+@UseGuards(AuthGuard, AdminGuard)
 @Controller('api/admin/analytics')
 export class AnalyticsController {
   constructor(private analyticsService: AnalyticsService) {}

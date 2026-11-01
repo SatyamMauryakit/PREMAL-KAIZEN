@@ -8,7 +8,7 @@ interface CheckoutItem {
   price: number; // Price per unit in paise
 }
 
-interface DiscountCalculation {
+export interface DiscountCalculation {
   promotionId?: string;
   couponCode?: string;
   originalSubtotal: number;
@@ -41,8 +41,8 @@ export class PromotionsService {
 
     if (filters?.search) {
       whereClause.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { code: { contains: filters.search, mode: 'insensitive' } },
+        { name: { contains: filters.search } },
+        { code: { contains: filters.search } },
       ];
     }
 
@@ -74,7 +74,7 @@ export class PromotionsService {
 
     // Enrich with status
     const enriched = promotions.map(p => ({
-      ...p,
+      ...this.deserializePromotion(p),
       status: this.getPromotionStatus(p),
       remainingUsage: p.totalUsageLimit ? p.totalUsageLimit - p.usageCount : null,
     }));
@@ -103,7 +103,7 @@ export class PromotionsService {
     }
 
     return {
-      ...promotion,
+      ...this.deserializePromotion(promotion),
       status: this.getPromotionStatus(promotion),
       remainingUsage: promotion.totalUsageLimit ? promotion.totalUsageLimit - promotion.usageCount : null,
     };
@@ -148,10 +148,10 @@ export class PromotionsService {
         maxDiscount: data.maxDiscount || null,
         minSubtotal: data.minSubtotal || null,
         firstOrderOnly: data.firstOrderOnly || false,
-        eligibleProductIds: data.eligibleProductIds || [],
-        eligibleCategoryIds: data.eligibleCategoryIds || [],
-        excludedProductIds: data.excludedProductIds || [],
-        excludedCategoryIds: data.excludedCategoryIds || [],
+        eligibleProductIds: JSON.stringify(data.eligibleProductIds || []),
+        eligibleCategoryIds: JSON.stringify(data.eligibleCategoryIds || []),
+        excludedProductIds: JSON.stringify(data.excludedProductIds || []),
+        excludedCategoryIds: JSON.stringify(data.excludedCategoryIds || []),
         startDate: data.startDate ? new Date(data.startDate) : null,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         isActive: data.isActive || false,
@@ -162,7 +162,7 @@ export class PromotionsService {
     });
 
     return {
-      ...promotion,
+      ...this.deserializePromotion(promotion),
       status: this.getPromotionStatus(promotion),
     };
   }
@@ -194,10 +194,10 @@ export class PromotionsService {
         maxDiscount: data.maxDiscount !== undefined ? data.maxDiscount : promotion.maxDiscount,
         minSubtotal: data.minSubtotal !== undefined ? data.minSubtotal : promotion.minSubtotal,
         firstOrderOnly: data.firstOrderOnly !== undefined ? data.firstOrderOnly : promotion.firstOrderOnly,
-        eligibleProductIds: data.eligibleProductIds || promotion.eligibleProductIds,
-        eligibleCategoryIds: data.eligibleCategoryIds || promotion.eligibleCategoryIds,
-        excludedProductIds: data.excludedProductIds || promotion.excludedProductIds,
-        excludedCategoryIds: data.excludedCategoryIds || promotion.excludedCategoryIds,
+        eligibleProductIds: Array.isArray(data.eligibleProductIds) ? JSON.stringify(data.eligibleProductIds) : promotion.eligibleProductIds,
+        eligibleCategoryIds: Array.isArray(data.eligibleCategoryIds) ? JSON.stringify(data.eligibleCategoryIds) : promotion.eligibleCategoryIds,
+        excludedProductIds: Array.isArray(data.excludedProductIds) ? JSON.stringify(data.excludedProductIds) : promotion.excludedProductIds,
+        excludedCategoryIds: Array.isArray(data.excludedCategoryIds) ? JSON.stringify(data.excludedCategoryIds) : promotion.excludedCategoryIds,
         startDate: data.startDate ? new Date(data.startDate) : promotion.startDate,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : promotion.expiryDate,
         isActive: data.isActive !== undefined ? data.isActive : promotion.isActive,
@@ -208,7 +208,7 @@ export class PromotionsService {
     });
 
     return {
-      ...updated,
+      ...this.deserializePromotion(updated),
       status: this.getPromotionStatus(updated),
     };
   }
@@ -299,7 +299,7 @@ export class PromotionsService {
         },
       });
 
-      const limit = coupon.perCustomerLimit || promotion.perCustomerLimit;
+      const limit = coupon.perCustomerLimit ?? promotion.perCustomerLimit ?? Infinity;
       if (customerUsageCount >= limit) {
         throw new BadRequestException('You have already used this promotion the maximum number of times');
       }
@@ -326,7 +326,7 @@ export class PromotionsService {
       originalSubtotal: subtotal,
       discountAmount,
       finalSubtotal: Math.max(0, subtotal - discountAmount),
-      discountPercentage: promotion.type === 'percentage' ? promotion.value : undefined,
+      discountPercentage: promotion.type === 'percentage' ? (promotion.value ?? undefined) : undefined,
     };
   }
 
@@ -487,9 +487,10 @@ export class PromotionsService {
       });
     }
 
+    // SQLite doesn't support skipDuplicates; codes are randomly generated so
+    // collisions are effectively impossible at this scale.
     const created = await this.prisma.couponCode.createMany({
       data: codes,
-      skipDuplicates: true,
     });
 
     return {
@@ -514,7 +515,9 @@ export class PromotionsService {
     return 'active';
   }
 
-  private async checkEligibility(items: CheckoutItem[], promotion: any): Promise<boolean> {
+  private async checkEligibility(items: CheckoutItem[], promotionRaw: any): Promise<boolean> {
+    const promotion = this.deserializePromotion(promotionRaw);
+
     // If no restrictions, all items are eligible
     if (promotion.eligibleProductIds.length === 0 && promotion.eligibleCategoryIds.length === 0) {
       return true;
@@ -536,6 +539,31 @@ export class PromotionsService {
     }
 
     return false;
+  }
+
+  /**
+   * Parse JSON-encoded eligibility/exclusion fields back into arrays
+   */
+  private deserializePromotion(promotion: any) {
+    if (!promotion) return promotion;
+    return {
+      ...promotion,
+      eligibleProductIds: this.safeParseArray(promotion.eligibleProductIds),
+      eligibleCategoryIds: this.safeParseArray(promotion.eligibleCategoryIds),
+      excludedProductIds: this.safeParseArray(promotion.excludedProductIds),
+      excludedCategoryIds: this.safeParseArray(promotion.excludedCategoryIds),
+    };
+  }
+
+  private safeParseArray(value: unknown): string[] {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   private calculateDiscount(subtotal: number, promotion: any): number {

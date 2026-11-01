@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -18,7 +18,10 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   emailVerified DateTime?
-  password      String    // Hashed password
+  password      String    // Hashed password (bcrypt)
+
+  // Role-based access: 'customer' or 'admin'
+  role          String    @default("customer")
 
   // Customer profile
   firstName     String?
@@ -121,9 +124,9 @@ model Product {
   // Availability
   isActive    Boolean   @default(true)
 
-  // Variants
-  colors      String[]  @default([])
-  sizes       String[]  @default([])
+  // Variants (stored as JSON-encoded strings - SQLite has no native array/json type)
+  colors      String    @default("[]")
+  sizes       String    @default("[]")
 
   // Wishlist items
   wishlistItems WishlistItem[]
@@ -381,11 +384,11 @@ model Promotion {
   minSubtotal           Int?      // Minimum order subtotal in paise
   firstOrderOnly        Boolean   @default(false)
 
-  // Products & categories
-  eligibleProductIds    String[]  @default([]) // Empty = all products eligible
-  eligibleCategoryIds   String[]  @default([]) // Empty = all categories eligible
-  excludedProductIds    String[]  @default([])
-  excludedCategoryIds   String[]  @default([])
+  // Products & categories (stored as JSON-encoded strings - SQLite has no native array/json type)
+  eligibleProductIds    String    @default("[]") // Empty = all products eligible
+  eligibleCategoryIds   String    @default("[]") // Empty = all categories eligible
+  excludedProductIds    String    @default("[]")
+  excludedCategoryIds   String    @default("[]")
 
   // Schedule
   startDate             DateTime?

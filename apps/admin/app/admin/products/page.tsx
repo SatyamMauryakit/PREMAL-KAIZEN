@@ -106,6 +106,7 @@ export default function ProductsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-light bg-gray-light">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Image</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">SKU</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Price</th>
@@ -116,6 +117,19 @@ export default function ProductsPage() {
                 <tbody>
                   {products.map((product) => (
                     <tr key={product.id} className="border-b border-gray-light hover:bg-gray-light">
+                      <td className="px-6 py-4">
+                        {product.images && product.images.length > 0 ? (
+                          <img
+                            src={product.images[0].url}
+                            alt={product.images[0].alt || product.name}
+                            className="w-12 h-12 object-cover rounded border border-gray-light"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 flex items-center justify-center rounded border border-dashed border-gray-light text-gray-medium text-[10px]">
+                            No image
+                          </div>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-sm font-medium text-black">{product.name}</td>
                       <td className="px-6 py-4 text-sm text-gray-dark">{product.sku}</td>
                       <td className="px-6 py-4 text-sm font-medium text-black">{formatPrice(product.price)}</td>

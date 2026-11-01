@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Icons } from './Icons';
+import { adminAuthService } from '@/lib/auth-service';
 
 interface NavItem {
   label: string;
@@ -27,10 +28,9 @@ export const Sidebar: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (confirm('Are you sure you want to logout?')) {
-      localStorage.removeItem('adminSessionToken');
-      localStorage.removeItem('sessionToken');
+      await adminAuthService.logout();
       router.push('/auth/login');
     }
   };

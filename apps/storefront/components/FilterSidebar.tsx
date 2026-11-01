@@ -1,7 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { CATEGORIES, SIZES, COLORS, PRICE_RANGE } from '@/lib/products';
+import { SIZES, COLORS } from '@/lib/products';
 
 interface FilterSidebarProps {
   selectedCategories: string[];
@@ -16,6 +15,10 @@ interface FilterSidebarProps {
   onClearAll: () => void;
   isMobile?: boolean;
   onClose?: () => void;
+  /** Category options derived from the live catalog (replaces any hardcoded list). */
+  categories: Array<{ id: string; label: string }>;
+  /** Price slider bounds derived from the live catalog. */
+  priceRange: { min: number; max: number };
 }
 
 export const FilterSidebar: React.FC<FilterSidebarProps> = ({
@@ -31,6 +34,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
   onClearAll,
   isMobile = false,
   onClose,
+  categories,
+  priceRange,
 }) => {
   const toggleCategory = (category: string) => {
     if (selectedCategories.includes(category)) {
@@ -60,8 +65,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
     selectedCategories.length > 0 ||
     selectedSizes.length > 0 ||
     selectedColors.length > 0 ||
-    priceMin > PRICE_RANGE.min ||
-    priceMax < PRICE_RANGE.max;
+    priceMin > priceRange.min ||
+    priceMax < priceRange.max;
 
   return (
     <div className={`${isMobile ? 'fixed inset-0 z-40 bg-black/50' : ''}`} onClick={isMobile ? onClose : undefined}>
@@ -91,7 +96,10 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
         <div className="mb-8">
           <h3 className="font-bold text-black text-sm mb-3">CATEGORY</h3>
           <div className="space-y-2">
-            {CATEGORIES.map((category) => (
+            {categories.length === 0 && (
+              <p className="text-xs text-gray-medium">No categories yet</p>
+            )}
+            {categories.map((category) => (
               <label key={category.id} className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -131,8 +139,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
           <div className="space-y-4">
             <input
               type="range"
-              min={PRICE_RANGE.min}
-              max={PRICE_RANGE.max}
+              min={priceRange.min}
+              max={priceRange.max}
               value={priceMin}
               onChange={(e) => onPriceChange(Number(e.target.value), priceMax)}
               className="w-full"
@@ -144,8 +152,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             </div>
             <input
               type="range"
-              min={PRICE_RANGE.min}
-              max={PRICE_RANGE.max}
+              min={priceRange.min}
+              max={priceRange.max}
               value={priceMax}
               onChange={(e) => onPriceChange(priceMin, Number(e.target.value))}
               className="w-full"

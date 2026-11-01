@@ -1,6 +1,9 @@
-import { Controller, Get, Put, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Put, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { SettingsService, StoreSettingsDTO, ShippingMethod } from './settings.service';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 
+@UseGuards(AuthGuard, AdminGuard)
 @Controller('api/admin/settings')
 export class SettingsController {
   constructor(private settingsService: SettingsService) {}
@@ -17,10 +20,8 @@ export class SettingsController {
    * Update store settings
    */
   @Put()
-  async updateSettings(@Body() updates: StoreSettingsDTO) {
-    // In production, extract adminId from JWT token
-    const adminId = 'admin-user-id';
-    return this.settingsService.updateSettings(updates, adminId);
+  async updateSettings(@Body() updates: StoreSettingsDTO, @Req() req: any) {
+    return this.settingsService.updateSettings(updates, req.user.id);
   }
 
   /**
@@ -35,9 +36,8 @@ export class SettingsController {
    * Update shipping methods
    */
   @Put('shipping/methods')
-  async updateShippingMethods(@Body() methods: ShippingMethod[]) {
-    const adminId = 'admin-user-id';
-    return this.settingsService.updateShippingMethods(methods, adminId);
+  async updateShippingMethods(@Body() methods: ShippingMethod[], @Req() req: any) {
+    return this.settingsService.updateShippingMethods(methods, req.user.id);
   }
 
   /**
@@ -53,13 +53,13 @@ export class SettingsController {
    */
   @Put('tax')
   async updateTaxConfiguration(
-    @Body() data: { rate: number; mode: 'inclusive' | 'exclusive' }
+    @Body() data: { rate: number; mode: 'inclusive' | 'exclusive' },
+    @Req() req: any
   ) {
-    const adminId = 'admin-user-id';
     return this.settingsService.updateTaxConfiguration(
       data.rate,
       data.mode,
-      adminId
+      req.user.id
     );
   }
 
@@ -75,9 +75,8 @@ export class SettingsController {
    * Update notification preferences
    */
   @Put('notifications')
-  async updateNotifications(@Body() prefs: any) {
-    const adminId = 'admin-user-id';
-    return this.settingsService.updateNotificationPreferences(prefs, adminId);
+  async updateNotifications(@Body() prefs: any, @Req() req: any) {
+    return this.settingsService.updateNotificationPreferences(prefs, req.user.id);
   }
 
   /**
@@ -94,13 +93,13 @@ export class SettingsController {
    */
   @Put('maintenance')
   async setMaintenanceMode(
-    @Body() data: { enabled: boolean; message: string }
+    @Body() data: { enabled: boolean; message: string },
+    @Req() req: any
   ) {
-    const adminId = 'admin-user-id';
     return this.settingsService.setMaintenanceMode(
       data.enabled,
       data.message,
-      adminId
+      req.user.id
     );
   }
 

@@ -1,6 +1,9 @@
 import { Injectable, BadRequestException, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
+
+const BCRYPT_ROUNDS = 10;
 
 /**
  * IdentityService
@@ -43,8 +46,8 @@ export class IdentityService {
       throw new BadRequestException('Password must be at least 8 characters');
     }
 
-    // Hash password (using simple hash for demo - use bcrypt in production)
-    const hashedPassword = Buffer.from(password).toString('base64');
+    // Hash password with bcrypt
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     // Create user
     const user = await this.prisma.user.create({
@@ -79,9 +82,29 @@ export class IdentityService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    // Verify password (using simple comparison for demo - use bcrypt in production)
-    const hashedPassword = Buffer.from(password).toString('base64');
-    const isPasswordValid = hashedPassword === user.password;
+    if (!user.isActive) {
+      throw new UnauthorizedException('This account has been disabled');
+    }
+
+    // Support bcrypt hashes; fall back to legacy base64 hashes created before
+    // the bcrypt migration and transparently upgrade them on successful login.
+    let isPasswordValid: boolean;
+    const looksLikeBcryptHash = /^\$2[aby]\$/.test(user.password);
+
+    if (looksLikeBcryptHash) {
+      isPasswordValid = await bcrypt.compare(password, user.password);
+    } else {
+      const legacyHash = Buffer.from(password).toString('base64');
+      isPasswordValid = legacyHash === user.password;
+      if (isPasswordValid) {
+        const upgradedHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { password: upgradedHash },
+        });
+      }
+    }
+
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -102,6 +125,7 @@ export class IdentityService {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        role: user.role,
         emailVerified: user.emailVerified,
       },
     };
@@ -199,8 +223,8 @@ export class IdentityService {
       throw new BadRequestException('User not found');
     }
 
-    // Hash new password (using simple hash for demo - use bcrypt in production)
-    const hashedPassword = Buffer.from(newPassword).toString('base64');
+    // Hash new password with bcrypt
+    const hashedPassword = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
     // Update password and delete token
     await this.prisma.user.update({

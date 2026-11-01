@@ -1,16 +1,29 @@
 'use client';
 
 import { Header } from '@/components/Header';
-import { useState, useEffect } from 'react';
-import { adminProductsService, adminCategoriesService, CategoryResponse } from '@/lib/products-service';
+import { useState, useEffect, useRef } from 'react';
+import {
+  adminProductsService,
+  adminCategoriesService,
+  adminUploadsService,
+  CategoryResponse,
+  UploadedImage,
+} from '@/lib/products-service';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+
+interface ImageEntry extends UploadedImage {
+  id: string;
+}
 
 export default function CreateProductPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryResponse[]>([]);
+  const [images, setImages] = useState<ImageEntry[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: '',
     sku: '',
@@ -27,11 +40,15 @@ export default function CreateProductPage() {
     loadCategories();
   }, []);
 
+  const getToken = () => {
+    const token = localStorage.getItem('adminSessionToken');
+    if (!token) throw new Error('Not authenticated. Please log in again.');
+    return token;
+  };
+
   const loadCategories = async () => {
     try {
-      const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
-      if (!token) throw new Error('Not authenticated');
-      const result = await adminCategoriesService.getCategories(token);
+      const result = await adminCategoriesService.getCategories(getToken());
       setCategories(result.data);
     } catch (err) {
       console.error('Failed to load categories:', err);
@@ -46,29 +63,65 @@ export default function CreateProductPage() {
     }));
   };
 
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    setError(null);
+    setIsUploading(true);
+
+    try {
+      const token = getToken();
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+          throw new Error(`"${file.name}" is not an image file`);
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          throw new Error(`"${file.name}" exceeds the 5MB size limit`);
+        }
+        const uploaded = await adminUploadsService.uploadImage(file, token);
+        setImages(prev => [...prev, { ...uploaded, id: crypto.randomUUID() }]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload image');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const removeImage = (id: string) => {
+    setImages(prev => prev.filter(img => img.id !== id));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
     try {
-      const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
-      if (!token) throw new Error('Not authenticated');
+      const token = getToken();
 
       if (!formData.name || !formData.sku || !formData.price) {
         throw new Error('Name, SKU, and price are required');
+      }
+
+      const price = parseFloat(formData.price);
+      if (!Number.isFinite(price) || price < 0) {
+        throw new Error('Price must be a valid non-negative number');
       }
 
       const productData = {
         name: formData.name,
         sku: formData.sku,
         description: formData.description,
-        price: Math.round(parseFloat(formData.price) * 100),
+        price: Math.round(price * 100),
         originalPrice: formData.originalPrice ? Math.round(parseFloat(formData.originalPrice) * 100) : null,
         categoryId: formData.categoryId || null,
         colors: formData.colors.split(',').map(c => c.trim()).filter(Boolean),
         sizes: formData.sizes.split(',').map(s => s.trim()).filter(Boolean),
         isActive: formData.isActive,
+        images: images.map((img, index) => ({ url: img.url, alt: formData.name, order: index })),
       };
 
       await adminProductsService.createProduct(productData, token);
@@ -93,6 +146,51 @@ export default function CreateProductPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Images */}
+            <div>
+              <label className="block text-sm font-medium text-black mb-2">Product Images</label>
+
+              {images.length > 0 && (
+                <div className="grid grid-cols-4 gap-3 mb-3">
+                  {images.map((img, index) => (
+                    <div key={img.id} className="relative group">
+                      <img
+                        src={img.url}
+                        alt={`Product preview ${index + 1}`}
+                        className="w-full h-24 object-cover rounded border border-gray-light"
+                      />
+                      {index === 0 && (
+                        <span className="absolute top-1 left-1 bg-black text-cream text-[10px] px-1.5 py-0.5 rounded">
+                          Primary
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(img.id)}
+                        className="absolute top-1 right-1 bg-black/70 text-cream w-5 h-5 rounded-full text-xs leading-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        aria-label="Remove image"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                multiple
+                onChange={handleImageSelect}
+                disabled={isUploading}
+                className="w-full px-4 py-2 border border-gray-light rounded text-sm focus:outline-none focus:border-black disabled:opacity-50"
+              />
+              <p className="text-xs text-gray-medium mt-1">
+                {isUploading ? 'Uploading...' : 'JPEG, PNG, WEBP, or GIF. Max 5MB each. First image becomes the primary image.'}
+              </p>
+            </div>
+
             {/* Name */}
             <div>
               <label className="block text-sm font-medium text-black mb-2">Product Name *</label>
@@ -145,6 +243,7 @@ export default function CreateProductPage() {
                   onChange={handleChange}
                   placeholder="0.00"
                   step="0.01"
+                  min="0"
                   className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black"
                   required
                 />
@@ -158,6 +257,7 @@ export default function CreateProductPage() {
                   onChange={handleChange}
                   placeholder="0.00"
                   step="0.01"
+                  min="0"
                   className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black"
                 />
               </div>
@@ -214,15 +314,15 @@ export default function CreateProductPage() {
                 onChange={handleChange}
                 className="mr-2"
               />
-              <label className="text-sm text-black">Active</label>
+              <label className="text-sm text-black">Active (visible on storefront)</label>
             </div>
 
             {/* Actions */}
             <div className="flex gap-4 pt-4 border-t border-gray-light">
               <button
                 type="submit"
-                disabled={isLoading}
-                className="px-6 py-2 bg-black text-cream font-medium rounded hover:bg-gray-dark disabled:opacity-50"
+                disabled={isLoading || isUploading}
+                className="px-6 py-2 bg-black text-cream font-medium rounded hover:bg-gray-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isLoading ? 'Creating...' : 'Create Product'}
               </button>

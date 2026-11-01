@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
@@ -11,6 +12,7 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SettingsModule } from './settings/settings.module';
 import { ContactModule } from './contact/contact.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 /**
  * AppModule
@@ -38,7 +40,7 @@ import { ContactModule } from './contact/contact.module';
  * - Contact: Contact form submissions (Storefront)
  */
 @Module({
-  imports: [ProductsModule, CategoriesModule, OrdersModule, InventoryModule, PromotionsModule, AnalyticsModule, SettingsModule, ContactModule, CartModule, WishlistModule, IdentityModule, CustomerModule],
+  imports: [PrismaModule, ProductsModule, CategoriesModule, OrdersModule, InventoryModule, PromotionsModule, AnalyticsModule, SettingsModule, ContactModule, CartModule, WishlistModule, IdentityModule, CustomerModule, UploadsModule],
   controllers: [],
   providers: [],
 })
