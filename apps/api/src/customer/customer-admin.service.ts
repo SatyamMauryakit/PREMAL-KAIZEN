@@ -16,8 +16,8 @@ export class CustomerAdminService {
     fromDate?: Date;
     toDate?: Date;
   }) {
-    const page = filters?.page || 1;
-    const limit = filters?.limit || 20;
+    const page = Number(filters?.page) || 1;
+    const limit = Number(filters?.limit) || 20;
     const skip = (page - 1) * limit;
 
     const whereClause: any = {};
@@ -185,7 +185,7 @@ export class CustomerAdminService {
       throw new NotFoundException(`Customer with ID ${customerId} not found`);
     }
 
-    const page = filters?.page || 1;
+    const page = Number(filters?.page) || 1;
     const limit = filters?.limit || 10;
     const skip = (page - 1) * limit;
 
