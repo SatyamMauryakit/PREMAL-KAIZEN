@@ -1,5 +1,14 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
+//
+// This is the real application schema - the client generated from this file is shared
+// (node_modules/@prisma/client) and is what the running dev server and production build
+// both depend on. If you ever need a second schema for testing a different datasource
+// (e.g. trying Postgres), copy this file elsewhere, give its `generator client` block its
+// own `output = "..."` path, and generate it with an explicit `--schema=` flag. Never run
+// `prisma generate` for a test schema without an isolated `output` - doing so overwrites
+// this shared client out from under the live app (this happened once during the SQLite ->
+// Postgres migration test and briefly broke the running dev server).
 
 generator client {
   provider = "prisma-client-js"
@@ -83,15 +92,17 @@ model Address {
   phoneNumber String
   street1     String    // Street address
   street2     String?   // Apartment, suite, etc.
+  landmark    String?   // Nearby landmark (optional, common in Indian addresses)
   city        String
   state       String    // State or province
-  postalCode  String
+  postalCode  String    // 6-digit PIN code for India
   country     String
 
   // Default address for delivery
   isDefault   Boolean   @default(false)
 
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders      Order[]
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -222,11 +233,26 @@ model Order {
   paymentMethod String    @default("cod") // card, upi, netbanking, cod
   paymentStatus String    @default("pending") // pending, completed, failed, refunded
 
+  // Razorpay (set only for online-payment orders; always null for COD)
+  razorpayOrderId   String?   @unique
+  razorpayPaymentId String?
+  razorpaySignature String?
+  paymentVerifiedAt DateTime? // set only after server-side signature verification succeeds
+
+  // Notification idempotency - prevents duplicate emails on webhook retries/duplicate callbacks
+  orderEmailSentAt       DateTime?
+  paymentEmailSentAt     DateTime?
+  paymentFailedEmailSentAt DateTime?
+
   // Pricing
   subtotal      Int       // in paise (before discount)
   discount      Int       @default(0) // discount amount in paise (Phase 13)
   shipping      Int       @default(0)
-  tax           Int       @default(0)
+  tax           Int       @default(0) // total tax (cgst+sgst, or igst)
+  cgst          Int       @default(0) // in paise - intra-state orders only
+  sgst          Int       @default(0) // in paise - intra-state orders only
+  igst          Int       @default(0) // in paise - inter-state orders only
+  taxRate       Float     @default(0) // GST % applied, frozen at order time so later rate changes don't alter history
   total         Int       // final amount in paise
 
   // Promotions (Phase 13)
@@ -237,6 +263,7 @@ model Order {
   shippingMethod String   @default("standard") // standard, express, overnight
   carrier       String?   // e.g., "FedEx", "DHL" (Phase 11 addition)
   addressId     String?
+  address       Address?  @relation(fields: [addressId], references: [id])
   trackingNumber String?
   estimatedDelivery DateTime?
 
@@ -481,6 +508,8 @@ model StoreSettings {
   storeEmail        String    @default("support@premalkaizen.com")
   storePhone        String    @default("+91-XXX-XXX-XXXX")
   businessAddress   String    @default("")
+  businessState     String    @default("") // Registered business state - determines CGST+SGST vs IGST on orders
+  gstin             String    @default("") // GSTIN, set by the business admin - never invented by the system
 
   // Regional Settings
   timezone          String    @default("Asia/Kolkata")
@@ -507,8 +536,12 @@ model StoreSettings {
   lowStockNotificationsEnabled Boolean @default(true)
 
   // Security & Integrations
+  // stripeEnabled is historical/unused - Stripe was never actively integrated (no SDK, no
+  // checkout flow, no webhook). Left in place only so existing rows don't lose the column;
+  // no current code path reads it for gating. Razorpay is the real, active online provider.
   stripeEnabled     Boolean  @default(false)
   razorpayEnabled   Boolean  @default(false)
+  codEnabled        Boolean  @default(true) // Cash on Delivery - independent of Razorpay
   emailNotificationsEnabled Boolean @default(true)
   smsNotificationsEnabled Boolean @default(false)
 
@@ -517,6 +550,25 @@ model StoreSettings {
   lastModifiedBy    String?   // Admin user ID who made the last change
 
   @@unique([id]) // Enforce singleton pattern
+}
+
+// ============================================================================
+// PAYMENT WEBHOOKS
+// ============================================================================
+
+// Records every verified Razorpay webhook delivery by its event id, so a retried
+// or duplicate delivery (Razorpay retries on timeout/non-2xx) is detected and
+// skipped instead of re-processing the same payment event twice.
+model PaymentWebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String   @default("razorpay")
+  eventId     String   // Razorpay's x-razorpay-event-id / payload.event + payload id
+  eventType   String   // e.g. 'payment.captured', 'payment.failed'
+  orderId     String?  // Our internal Order.id, once resolved
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([orderId])
 }
 
 model SettingsAuditLog {
@@ -531,5 +583,24 @@ model SettingsAuditLog {
 
   @@index([setting])
   @@index([changedBy])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// CONTACT FORM
+// ============================================================================
+
+model ContactMessage {
+  id          String    @id @default(cuid())
+  name        String
+  email       String
+  subject     String
+  category    String    // 'order-status', 'shipping', 'returns', 'product-question', 'payment-issue', 'general'
+  orderNumber String?
+  message     String
+
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
   @@index([createdAt])
 }

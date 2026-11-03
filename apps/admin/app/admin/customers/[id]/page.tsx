@@ -4,14 +4,12 @@ import { Header } from '@/components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminCustomersService, CustomerDetails, Order } from '@/lib/customers-service';
-import { useRouter } from 'next/navigation';
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
 export default function CustomerDetailsPage({ params }: PageProps) {
-  const router = useRouter();
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
   const [customer, setCustomer] = useState<CustomerDetails | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -160,13 +158,13 @@ export default function CustomerDetailsPage({ params }: PageProps) {
                   <div>
                     <p className="text-xs text-gray-medium">Registered</p>
                     <p className="text-sm font-medium text-black">
-                      {new Date(customer.createdAt).toLocaleDateString()}
+                      {new Date(customer.createdAt).toLocaleDateString('en-IN')}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-medium">Last Login</p>
                     <p className="text-sm font-medium text-black">
-                      {customer.lastLogin ? new Date(customer.lastLogin).toLocaleDateString() : 'Never'}
+                      {customer.lastLogin ? new Date(customer.lastLogin).toLocaleDateString('en-IN') : 'Never'}
                     </p>
                   </div>
                 </div>
@@ -193,10 +191,12 @@ export default function CustomerDetailsPage({ params }: PageProps) {
                       </p>
                       <p className="text-sm text-gray-dark">{address.street1}</p>
                       {address.street2 && <p className="text-sm text-gray-dark">{address.street2}</p>}
+                      {address.landmark && <p className="text-sm text-gray-dark">Near {address.landmark}</p>}
                       <p className="text-sm text-gray-dark">
-                        {address.city}, {address.state} {address.postalCode}
+                        {address.city}, {address.state} - {address.postalCode}
                       </p>
                       <p className="text-sm text-gray-dark">{address.country}</p>
+                      <p className="text-sm text-gray-dark">{address.phoneNumber}</p>
                     </div>
                   ))}
                 </div>
@@ -219,7 +219,7 @@ export default function CustomerDetailsPage({ params }: PageProps) {
                       <div>
                         <p className="font-medium text-black">{order.orderNumber}</p>
                         <p className="text-xs text-gray-medium">
-                          {new Date(order.createdAt).toLocaleDateString()}
+                          {new Date(order.createdAt).toLocaleDateString('en-IN')}
                         </p>
                       </div>
                       <div className="text-right">

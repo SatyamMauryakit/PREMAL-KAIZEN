@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 
-type SortOption = 'featured' | 'price-low' | 'price-high' | 'newest' | 'rating';
+type SortOption = 'featured' | 'price-low' | 'price-high' | 'newest';
 
 interface SortDropdownProps {
   value: SortOption;
@@ -14,7 +14,6 @@ const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: 'price-low', label: 'Price: Low to High' },
   { value: 'price-high', label: 'Price: High to Low' },
   { value: 'newest', label: 'Newest' },
-  { value: 'rating', label: 'Top Rated' },
 ];
 
 export const SortDropdown: React.FC<SortDropdownProps> = ({ value, onChange }) => {

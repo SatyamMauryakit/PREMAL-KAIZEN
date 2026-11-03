@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -7,16 +7,36 @@ import { AdminGuard } from '../common/guards/admin.guard';
 export class OrdersController {
   constructor(private ordersService: OrdersService) {}
 
-  // Used by both customers (own order history) and admins (full list) - the
-  // service layer scopes results by the caller-provided userId filter.
+  // Used by both customers (own order history) and admins (full list). Non-admin
+  // callers are always scoped to their own userId - a customer cannot pass a
+  // different userId to view another customer's orders.
+  @UseGuards(AuthGuard)
   @Get()
-  async findAll(@Query() query: any) {
-    return this.ordersService.findAll(query);
+  async findAll(@Query() query: any, @Req() req: any) {
+    const scoped = req.user.role === 'admin' ? query : { ...query, userId: req.user.id };
+    return this.ordersService.findAll(scoped);
   }
 
+  // Guest order tracking: no auth, but requires knowing both the order number and
+  // the exact email on the order - must be registered before the ':id' route below.
+  @Get('track')
+  async trackGuestOrder(@Query('orderNumber') orderNumber: string, @Query('email') email: string) {
+    if (!orderNumber || !email) {
+      throw new BadRequestException('orderNumber and email are required');
+    }
+    return this.ordersService.findForGuestTracking(orderNumber, email);
+  }
+
+  // A customer may only view their own order; admins may view any order. Returning
+  // 404 (not 403) for a mismatched owner avoids confirming that a guessed order ID exists.
+  @UseGuards(AuthGuard)
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.ordersService.findById(id);
+  async findOne(@Param('id') id: string, @Req() req: any) {
+    const order = await this.ordersService.findById(id);
+    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+      throw new NotFoundException(`Order with ID ${id} not found`);
+    }
+    return order;
   }
 
   // Requires login - an order must belong to a real account, and the user ID

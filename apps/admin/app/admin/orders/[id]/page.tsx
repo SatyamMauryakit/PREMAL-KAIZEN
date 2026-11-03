@@ -4,7 +4,6 @@ import { Header } from '@/components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminOrdersService, Order } from '@/lib/orders-service';
-import { useRouter } from 'next/navigation';
 
 const STATUS_OPTIONS = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 const PAYMENT_STATUS_OPTIONS = ['pending', 'completed', 'failed', 'refunded'];
@@ -14,7 +13,6 @@ interface PageProps {
 }
 
 export default function OrderDetailsPage({ params }: PageProps) {
-  const router = useRouter();
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -191,7 +189,7 @@ export default function OrderDetailsPage({ params }: PageProps) {
     <div className="min-h-screen bg-gray-light">
       <Header
         title={`Order ${order.orderNumber}`}
-        subtitle={new Date(order.createdAt).toLocaleDateString()}
+        subtitle={new Date(order.createdAt).toLocaleDateString('en-IN')}
       />
 
       <div className="p-6 max-w-6xl">
@@ -213,6 +211,24 @@ export default function OrderDetailsPage({ params }: PageProps) {
                   <span className="font-medium text-black">Email:</span> {order.user?.email}
                 </p>
               </div>
+            </div>
+
+            {/* Delivery Address */}
+            <div className="bg-white rounded-lg border border-gray-light p-6">
+              <h2 className="text-lg font-semibold text-black mb-4">Delivery Address</h2>
+              {order.address ? (
+                <div className="space-y-1 text-sm text-gray-dark">
+                  <p className="font-medium text-black">{order.address.firstName} {order.address.lastName}</p>
+                  <p>{order.address.street1}</p>
+                  {order.address.street2 && <p>{order.address.street2}</p>}
+                  {order.address.landmark && <p>Near {order.address.landmark}</p>}
+                  <p>{order.address.city}, {order.address.state} - {order.address.postalCode}</p>
+                  <p>{order.address.country}</p>
+                  <p>Phone: {order.address.phoneNumber}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-amber-700">No delivery address on file for this order.</p>
+              )}
             </div>
 
             {/* Order Items */}
@@ -249,9 +265,27 @@ export default function OrderDetailsPage({ params }: PageProps) {
                   <span className="text-black font-medium">{formatPrice(order.shipping)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-dark">Tax:</span>
+                  <span className="text-gray-dark">GST{order.taxRate ? ` (${order.taxRate}%)` : ''}:</span>
                   <span className="text-black font-medium">{formatPrice(order.tax)}</span>
                 </div>
+                {!!order.cgst && (
+                  <div className="flex justify-between pl-4 text-xs">
+                    <span className="text-gray-medium">CGST:</span>
+                    <span className="text-gray-medium">{formatPrice(order.cgst)}</span>
+                  </div>
+                )}
+                {!!order.sgst && (
+                  <div className="flex justify-between pl-4 text-xs">
+                    <span className="text-gray-medium">SGST:</span>
+                    <span className="text-gray-medium">{formatPrice(order.sgst)}</span>
+                  </div>
+                )}
+                {!!order.igst && (
+                  <div className="flex justify-between pl-4 text-xs">
+                    <span className="text-gray-medium">IGST:</span>
+                    <span className="text-gray-medium">{formatPrice(order.igst)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t border-gray-light pt-2 mt-2">
                   <span className="font-semibold text-black">Total:</span>
                   <span className="font-semibold text-black">{formatPrice(order.total)}</span>
@@ -270,7 +304,7 @@ export default function OrderDetailsPage({ params }: PageProps) {
                     value={carrier}
                     onChange={(e) => setCarrier(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black"
-                    placeholder="e.g., FedEx, DHL, India Post"
+                    placeholder="e.g., Delhivery, Blue Dart, India Post"
                   />
                 </div>
                 <div>
@@ -385,7 +419,7 @@ export default function OrderDetailsPage({ params }: PageProps) {
                   <span className="font-medium text-black">Order ID:</span> {order.orderNumber}
                 </p>
                 <p className="text-gray-dark">
-                  <span className="font-medium text-black">Placed:</span> {new Date(order.createdAt).toLocaleDateString()}
+                  <span className="font-medium text-black">Placed:</span> {new Date(order.createdAt).toLocaleDateString('en-IN')}
                 </p>
                 <p className="text-gray-dark">
                   <span className="font-medium text-black">Method:</span> {formatStatus(order.shippingMethod)}

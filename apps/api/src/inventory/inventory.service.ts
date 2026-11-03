@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const VALID_ADJUSTMENT_TYPES = ['received', 'correction', 'damage', 'manual_reconciliation', 'reserved', 'released'];
@@ -118,8 +118,6 @@ export class InventoryService {
    * Get low stock items
    */
   async getLowStockItems(threshold?: number) {
-    const limit = threshold || 10;
-
     // SQLite connector doesn't support comparing one column to another
     // (field references) in a where filter, so fetch candidates and compare in JS.
     const lowStockCandidates = await this.prisma.inventory.findMany({
@@ -131,8 +129,11 @@ export class InventoryService {
       },
       orderBy: { onHand: 'asc' },
     });
+    // An explicit threshold overrides every product's own configured reorderThreshold
+    // uniformly; with no threshold given, each product's own value applies (this is
+    // the only path the admin UI currently exercises, so its behavior is unchanged).
     const lowStock = lowStockCandidates
-      .filter((inv) => inv.onHand <= inv.reorderThreshold)
+      .filter((inv) => inv.onHand <= (threshold ?? inv.reorderThreshold))
       .slice(0, 50);
 
     const outOfStock = await this.prisma.inventory.findMany({
@@ -229,8 +230,7 @@ export class InventoryService {
       );
     }
 
-    // Prevent overselling if reserved stock exists
-    const available = previousOnHand - inventory.reserved;
+    // Prevent overselling: on-hand stock can never drop below what's already reserved
     if (newOnHand < inventory.reserved) {
       throw new BadRequestException(
         `Insufficient stock for adjustment. Current on-hand: ${previousOnHand}, Reserved: ${inventory.reserved}, Requested reduction: ${Math.abs(data.quantity)}`

@@ -1,0 +1,24 @@
+# Non-sensitive configuration only. Nothing here is a credential.
+#
+# CORS_ALLOWED_ORIGINS and APP_URL are placeholders - deploy.sh rewrites them to the
+# real detected EC2 public IP before applying this file.
+# DATABASE_URL has no credentials (SQLite is a local file path, not a network DB),
+# so it's safe here rather than in the Secret.
+# API_HOST: present for documentation/parity only - apps/api/src/main.ts hardcodes the
+# bind address to 0.0.0.0 directly and does not actually read this variable (verified).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: premal-api-config
+  namespace: premal-kaizen
+data:
+  NODE_ENV: "production"
+  API_HOST: "0.0.0.0"
+  API_PORT: "3002"
+  DATABASE_URL: "file:/app/apps/api/prisma/dev.db"
+  STORAGE_DRIVER: "local"
+  CORS_ALLOWED_ORIGINS: "__CORS_ALLOWED_ORIGINS__"
+  # Read by email.service.ts to build links in transactional emails (e.g. order
+  # confirmation) - without this it silently defaults to http://localhost:3000, which
+  # would be wrong/broken in any email sent from this deployment.
+  APP_URL: "__APP_URL__"

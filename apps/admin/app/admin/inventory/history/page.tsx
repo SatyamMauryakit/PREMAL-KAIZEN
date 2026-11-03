@@ -161,7 +161,7 @@ export default function InventoryHistoryPage() {
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-medium">
-                          {new Date(entry.createdAt).toLocaleDateString()}
+                          {new Date(entry.createdAt).toLocaleDateString('en-IN')}
                           <br />
                           <span className="text-xs">{new Date(entry.createdAt).toLocaleTimeString()}</span>
                         </td>

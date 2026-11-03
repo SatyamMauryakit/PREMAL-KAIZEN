@@ -1,6 +1,6 @@
 'use client';
 
-import { Product, formatPrice } from '@/lib/products';
+import { Product } from '@/lib/products';
 import { useCart } from '@/lib/cart-context';
 import { useWishlist } from '@/lib/wishlist-context';
 import Link from 'next/link';
@@ -93,20 +93,14 @@ export const ProductGrid: React.FC<ProductGridProps> = ({ products }) => {
               </h3>
             </Link>
 
-            {/* Rating */}
-            <div className="flex items-center gap-1 mb-2 text-xs">
-              <span className="text-black">★ {product.rating}</span>
-              <span className="text-gray-medium">({product.reviewCount})</span>
-            </div>
-
             {/* Price */}
             <div className="flex items-baseline gap-2 mb-4 mt-auto">
               <span className="text-base font-medium text-black">
-                ¥{product.price.toLocaleString('en-IN')}
+                ₹{product.price.toLocaleString('en-IN')}
               </span>
-              {product.originalPrice && (
+              {product.originalPrice && product.originalPrice > product.price && (
                 <span className="text-xs text-gray-medium line-through">
-                  ¥{product.originalPrice.toLocaleString('en-IN')}
+                  ₹{product.originalPrice.toLocaleString('en-IN')}
                 </span>
               )}
             </div>

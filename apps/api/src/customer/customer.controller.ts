@@ -1,10 +1,14 @@
-import { Controller, Get, Put, Post, Delete, Param, Body, Request, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Body, Request, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { CustomerService } from './customer.service';
+import { AuthGuard } from '../common/guards/auth.guard';
 
 /**
  * CustomerController
- * REST API endpoints for customer profile and addresses
+ * REST API endpoints for customer profile and addresses.
+ * Every route needs a real logged-in session - req.user is populated by
+ * AuthGuard from the verified session token, never trusted from the client.
  */
+@UseGuards(AuthGuard)
 @Controller('api/customer')
 export class CustomerController {
   constructor(private customerService: CustomerService) {}
@@ -105,11 +109,9 @@ export class CustomerController {
   // ========================================================================
 
   private extractUserId(req: any): string {
-    // In a real app, this would use a JWT guard or similar
-    // For now, we expect userId to be passed in headers or extracted from session
-    const userId = req.userId || req.user?.id;
+    const userId = req.user?.id;
     if (!userId) {
-      throw new NotFoundException('User not authenticated');
+      throw new UnauthorizedException('User not authenticated');
     }
     return userId;
   }

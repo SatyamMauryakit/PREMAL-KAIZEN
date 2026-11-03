@@ -451,11 +451,17 @@ export class PromotionsService {
    * Core redemption logic, usable both standalone (wrapped in its own
    * transaction by redeemCoupon above) and inlined into a caller's own
    * transaction (e.g. OrdersService creating the order and redeeming the
-   * coupon atomically in one go). Re-checks usage limits against the live
-   * row inside the transaction - SQLite serializes writers, so this closes
-   * the race window between validate-coupon and redeem where two concurrent
-   * checkouts could both pass validation against the same "slot" and both
-   * redeem, exceeding the limit.
+   * coupon atomically in one go).
+   *
+   * The usage-limit checks below use conditional `updateMany` calls (id match
+   * AND usageCount below the limit) rather than a plain read-then-write - the
+   * WHERE clause is re-evaluated against the live row at UPDATE time, not the
+   * stale `coupon`/`coupon.promotion` snapshot read above, so two concurrent
+   * redemptions against the same limit can't both pass. `count === 0` means
+   * this attempt lost the race (or the limit was already reached) and is
+   * rejected the same way an upfront limit check would reject it. This is a
+   * standard conditional UPDATE - no raw SQL or provider-specific locking -
+   * so it behaves the same on SQLite and PostgreSQL.
    */
   async redeemCouponInTx(
     tx: any,
@@ -482,10 +488,25 @@ export class PromotionsService {
       return existing;
     }
 
-    if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
+    const couponUpdate = await tx.couponCode.updateMany({
+      where: {
+        id: coupon.id,
+        ...(coupon.usageLimit != null ? { usageCount: { lt: coupon.usageLimit } } : {}),
+      },
+      data: { usageCount: { increment: 1 } },
+    });
+    if (couponUpdate.count === 0) {
       throw new BadRequestException('This coupon code has reached its usage limit');
     }
-    if (coupon.promotion.totalUsageLimit && coupon.promotion.usageCount >= coupon.promotion.totalUsageLimit) {
+
+    const promotionUpdate = await tx.promotion.updateMany({
+      where: {
+        id: coupon.promotionId,
+        ...(coupon.promotion.totalUsageLimit != null ? { usageCount: { lt: coupon.promotion.totalUsageLimit } } : {}),
+      },
+      data: { usageCount: { increment: 1 } },
+    });
+    if (promotionUpdate.count === 0) {
       throw new BadRequestException('This promotion has reached its usage limit');
     }
 
@@ -497,16 +518,6 @@ export class PromotionsService {
         status: 'completed',
         discountAmount,
       },
-    });
-
-    await tx.couponCode.update({
-      where: { id: coupon.id },
-      data: { usageCount: { increment: 1 } },
-    });
-
-    await tx.promotion.update({
-      where: { id: coupon.promotionId },
-      data: { usageCount: { increment: 1 } },
     });
 
     return redemption;

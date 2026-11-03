@@ -1,40 +1,27 @@
 import Link from 'next/link';
-import { useState } from 'react';
+import { useWishlist } from '@/lib/wishlist-context';
 
 interface ProductCardProps {
   id: string;
   name: string;
-  price: string;
+  price: number; // in paise
   image?: string;
   href: string;
-  rating?: number;
-  reviewCount?: number;
+  category?: string;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
-  id: _id,
+  id,
   name,
   price,
   image,
   href,
-  rating = 4.5,
-  reviewCount = 0,
+  category = '',
 }) => {
-  const [isWishlisted, setIsWishlisted] = useState(false);
+  const wishlist = useWishlist();
+  const isWishlisted = wishlist.isInWishlist(id);
 
-  const renderStars = (rating: number) => {
-    const stars = [];
-    for (let i = 0; i < 5; i++) {
-      if (i < Math.floor(rating)) {
-        stars.push(<span key={i} className="text-xs">★</span>);
-      } else if (i < rating && i - rating < 0.5) {
-        stars.push(<span key={i} className="text-xs">★</span>);
-      } else {
-        stars.push(<span key={i} className="text-xs text-gray-300">★</span>);
-      }
-    }
-    return stars;
-  };
+  const formattedPrice = `₹${(price / 100).toLocaleString('en-IN')}`;
 
   return (
     <Link href={href} className="group h-full">
@@ -57,7 +44,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <button
             onClick={(e) => {
               e.preventDefault();
-              setIsWishlisted(!isWishlisted);
+              wishlist.toggleItem({ productId: id, name, price, image: image || '', category });
             }}
             className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-white hover:bg-cream rounded-full shadow-md transition-all hover:scale-110"
             aria-label={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
@@ -85,7 +72,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           </h3>
 
           <p className="text-sm font-semibold text-black mt-auto bg-beige px-3 py-1.5 rounded inline-block">
-            {price}
+            {formattedPrice}
           </p>
         </div>
       </div>

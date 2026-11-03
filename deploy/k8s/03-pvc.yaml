@@ -1,0 +1,44 @@
+# Static PersistentVolume backed by a real EC2 host directory (via kind-config.yaml's
+# extraMounts: /opt/premal-kaizen/data on the EC2 host -> /mnt/premal-data inside the
+# kind node), not kind's default dynamic local-path provisioner. The default provisioner
+# also uses hostPath, but at a path inside the kind node container's own writable layer -
+# that would NOT survive `kind delete cluster` or the node container being recreated.
+# Using extraMounts + a static PV here is what makes the SQLite file and uploaded images
+# actually live on the EC2 instance's disk, independent of the kind cluster's lifecycle.
+#
+# Single PVC, two subPath mounts (see 10-api-deployment.yaml):
+#   /mnt/premal-data/db      -> dev.db (subPath targets the one file, image's other
+#                                prisma/ contents - schema.prisma, migrations/ - are
+#                                NOT overlaid, they still come from the image)
+#   /mnt/premal-data/uploads -> uploads/ (the image's uploads/ dir is empty anyway)
+#
+# This PVC is intentionally ReadWriteOnce and the api Deployment is intentionally
+# replicas: 1 (see that file's comment) - SQLite does not support safe concurrent
+# writers across processes, so this is a hard constraint, not a missed optimization.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: premal-api-data-pv
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: premal-local
+  hostPath:
+    path: /mnt/premal-data
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: premal-api-data
+  namespace: premal-kaizen
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: premal-local
+  resources:
+    requests:
+      storage: 5Gi

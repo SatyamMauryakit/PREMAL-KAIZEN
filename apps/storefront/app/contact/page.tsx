@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { contactService, ContactFormData } from '@/lib/contact-service';
+import { getStoreContactInfo } from '@/lib/store-info';
 
 type FormState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -10,6 +11,13 @@ export default function ContactPage() {
   const [formState, setFormState] = useState<FormState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [contactEmail, setContactEmail] = useState('');
+
+  useEffect(() => {
+    getStoreContactInfo()
+      .then((info) => setContactEmail(info.storeEmail))
+      .catch(() => {});
+  }, []);
 
   const [formData, setFormData] = useState<ContactFormData>({
     name: '',
@@ -250,11 +258,7 @@ export default function ContactPage() {
               <div className="space-y-4 text-sm text-gray-dark">
                 <div>
                   <p className="text-xs font-medium text-black mb-1">Email</p>
-                  <p>support@premalikaizen.com</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-black mb-1">Response Time</p>
-                  <p>We typically reply within 24 hours during business days</p>
+                  <p>{contactEmail || 'Loading...'}</p>
                 </div>
               </div>
             </div>
@@ -313,9 +317,12 @@ export default function ContactPage() {
             Whether you have a question about our products, need help with an order, or just want to say hello,
             we'd love to hear from you. Fill out the form above and we'll get back to you as soon as possible.
           </p>
-          <p className="text-sm text-gray-medium">
-            Our team is available Monday–Friday, 9 AM–6 PM
-          </p>
+          {contactEmail && (
+            <p className="text-sm text-gray-medium">
+              You can also reach us directly at{' '}
+              <a href={`mailto:${contactEmail}`} className="text-black underline hover:no-underline">{contactEmail}</a>
+            </p>
+          )}
         </div>
       </div>
     </div>

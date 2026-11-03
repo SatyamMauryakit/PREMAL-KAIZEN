@@ -10,6 +10,21 @@ export interface OrderItem {
   selectedColor?: string;
 }
 
+export interface OrderAddress {
+  id: string;
+  label: string;
+  firstName: string;
+  lastName: string;
+  phoneNumber: string;
+  street1: string;
+  street2?: string;
+  landmark?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -19,10 +34,14 @@ export interface Order {
   status: 'pending' | 'confirmed' | 'processing' | 'packed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled';
   paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
   paymentMethod: 'card' | 'upi' | 'netbanking' | 'cod';
-  shippingMethod: 'standard' | 'express' | 'overnight';
+  shippingMethod: string;
   subtotal: number;
   shipping: number;
   tax: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
+  taxRate?: number;
   total: number;
   trackingNumber?: string;
   carrier?: string;
@@ -30,6 +49,7 @@ export interface Order {
   notes?: string;
   internalNotes?: string;
   addressId?: string;
+  address?: OrderAddress;
   createdAt: string;
   updatedAt: string;
 }

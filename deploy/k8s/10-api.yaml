@@ -1,0 +1,118 @@
+# @premal/api (NestJS 10 + Prisma 5, SQLite). See deploy/README.md for the full
+# architecture rationale; key points specific to this manifest:
+#
+# - replicas MUST stay 1. SQLite has no safe concurrent-multi-process-writer story,
+#   and this Deployment mounts the one real dev.db file. Do not raise this for
+#   "availability" - a second replica would corrupt or lock out the database.
+# - imagePullPolicy: Never - this image is loaded into kind directly via
+#   `kind load docker-image`, not pulled from any registry. If this were left at the
+#   default (Always/IfNotPresent-with-no-local-match-pulls), the pod would try to pull
+#   "premal-api:local" from Docker Hub and fail, since no such public image exists there.
+# - livenessProbe hits /api/health (no DB dependency - safe even if the DB is briefly
+#   unavailable, won't cause a restart loop). readinessProbe hits /api/health/ready
+#   (checks DB connectivity) so the Service only sends traffic once the DB is reachable.
+#   Both routes verified in apps/api/src/health/health.controller.ts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premal-api
+  namespace: premal-kaizen
+  labels:
+    app: premal-api
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # not RollingUpdate - two pods would both try to open the same SQLite file
+  selector:
+    matchLabels:
+      app: premal-api
+  template:
+    metadata:
+      labels:
+        app: premal-api
+    spec:
+      # Explicit, not just inherited from the image's `USER appuser` line - defense in
+      # depth against a cluster/runtime default that would otherwise run as root, and
+      # matches the fixed UID/GID deploy.sh chowns the host data directory to (10001).
+      # If this ever drifts from the Dockerfiles' `useradd --uid/--gid`, the pod will
+      # fail to start (runAsNonRoot refuses to run the image's actual root-owned
+      # process) rather than silently running with the wrong permissions.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      # Ensures /mnt/premal-data/db/dev.db and /mnt/premal-data/uploads exist as a real
+      # file and real directory BEFORE the main container's subPath mounts below try to
+      # reference them. Without this, a brand-new PV (nothing written yet) leaves subPath
+      # file-mounting behavior ambiguous (kubelet infers file-vs-directory partly from
+      # what already exists at that path, and the image itself ships no dev.db - see
+      # .dockerignore). `touch` is a no-op on an already-existing file, so this is safe
+      # to rerun and NEVER overwrites real data. Uses the api image itself (already
+      # loaded into kind, imagePullPolicy: Never) instead of pulling an extra image.
+      initContainers:
+        - name: init-data-dirs
+          image: premal-api:local
+          imagePullPolicy: Never
+          command: ["sh", "-c", "mkdir -p /data/db /data/uploads && touch /data/db/dev.db"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: api
+          image: premal-api:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - configMapRef:
+                name: premal-api-config
+            - secretRef:
+                name: premal-api-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /app/apps/api/prisma/dev.db
+              subPath: db/dev.db
+            - name: data
+              mountPath: /app/apps/api/uploads
+              subPath: uploads
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 3002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: premal-api-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-api
+  namespace: premal-kaizen
+spec:
+  type: NodePort
+  selector:
+    app: premal-api
+  ports:
+    - port: 3002
+      targetPort: 3002
+      nodePort: 30002

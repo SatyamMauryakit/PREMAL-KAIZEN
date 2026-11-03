@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
+import { HealthModule } from './health/health.module';
 import { ProductsModule } from './products/products.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CartModule } from './cart/cart.module';
@@ -13,6 +16,8 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { SettingsModule } from './settings/settings.module';
 import { ContactModule } from './contact/contact.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { PaymentsModule } from './payments/payments.module';
+import { EmailModule } from './email/email.module';
 
 /**
  * AppModule
@@ -40,8 +45,34 @@ import { UploadsModule } from './uploads/uploads.module';
  * - Contact: Contact form submissions (Storefront)
  */
 @Module({
-  imports: [PrismaModule, ProductsModule, CategoriesModule, OrdersModule, InventoryModule, PromotionsModule, AnalyticsModule, SettingsModule, ContactModule, CartModule, WishlistModule, IdentityModule, CustomerModule, UploadsModule],
+  imports: [
+    // Baseline, generous per-IP rate limit applied to every route by default (120
+    // requests/minute). Sensitive routes (login, register, password reset) set a
+    // stricter named throttler via @Throttle(); the Razorpay webhook is explicitly
+    // exempt via @SkipThrottle() - see payments.controller.ts. In-memory storage is
+    // fine for a single API instance; once there are multiple replicas, this needs a
+    // shared store (e.g. @nest-lab/throttler-storage-redis) or each replica will count
+    // independently and the effective limit becomes limit * replica count.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 120 }]),
+    PrismaModule,
+    HealthModule,
+    ProductsModule,
+    CategoriesModule,
+    OrdersModule,
+    InventoryModule,
+    PromotionsModule,
+    AnalyticsModule,
+    SettingsModule,
+    ContactModule,
+    CartModule,
+    WishlistModule,
+    IdentityModule,
+    CustomerModule,
+    UploadsModule,
+    PaymentsModule,
+    EmailModule,
+  ],
   controllers: [],
-  providers: [],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

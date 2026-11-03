@@ -56,13 +56,13 @@ export const HeroSection: React.FC = () => {
               <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m0 10v10l8 4m0-10l8-4" />
               </svg>
-              <span>Free Shipping over $100</span>
+              <span>Pan-India Delivery</span>
             </div>
             <div className="flex items-center gap-2">
               <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m7.5-4.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span>Designed in HK</span>
+              <span>Cash on Delivery Available</span>
             </div>
           </div>
         </div>

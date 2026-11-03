@@ -1,10 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { Logo } from './Logo';
+import { useEffect, useState } from 'react';
+import { getStoreContactInfo } from '@/lib/store-info';
 
 export const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
+  const [supportEmail, setSupportEmail] = useState('');
+
+  useEffect(() => {
+    getStoreContactInfo()
+      .then((info) => setSupportEmail(info.storeEmail))
+      .catch(() => {});
+  }, []);
 
   return (
     <footer className="bg-black text-cream py-16 md:py-24 px-4 sm:px-6 md:px-8">
@@ -13,11 +21,12 @@ export const Footer: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12 mb-12">
           {/* Brand Column */}
           <div>
-            <Link href="/" className="inline-flex items-center gap-2 mb-4 hover:opacity-80 transition-opacity">
-              <div className="w-8 h-8 text-cream flex-shrink-0">
-                <Logo className="w-full h-full" />
-              </div>
-              <span className="text-sm font-bold tracking-widest uppercase">PREMAL KAIZEN</span>
+            <Link href="/" className="inline-flex items-center mb-4 hover:opacity-80 transition-opacity">
+              <img
+                src="/logo/logo-wordmark-white.png"
+                alt="PREMAL KAIZEN"
+                className="h-6 w-auto"
+              />
             </Link>
             <p className="text-sm text-gray-light leading-relaxed mb-4">
               Wear your vibe. Own your story.
@@ -32,7 +41,6 @@ export const Footer: React.FC = () => {
               {[
                 { label: 'All Products', href: '/shop' },
                 { label: 'New Arrivals', href: '/shop?filter=new' },
-                { label: 'Best Sellers', href: '/shop?filter=popular' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link
@@ -65,14 +73,16 @@ export const Footer: React.FC = () => {
                   </Link>
                 </li>
               ))}
-              <li>
-                <a
-                  href="mailto:support@premalikaizen.com"
-                  className="text-gray-light hover:text-cream transition-colors"
-                >
-                  Email Support
-                </a>
-              </li>
+              {supportEmail && (
+                <li>
+                  <a
+                    href={`mailto:${supportEmail}`}
+                    className="text-gray-light hover:text-cream transition-colors"
+                  >
+                    Email Support
+                  </a>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -116,7 +126,9 @@ export const Footer: React.FC = () => {
           <div className="flex gap-6 md:gap-8">
             <Link href="/contact" className="hover:text-cream transition-colors">Contact</Link>
             <Link href="/orders" className="hover:text-cream transition-colors">Track Order</Link>
-            <a href="mailto:support@premalikaizen.com" className="hover:text-cream transition-colors">Support</a>
+            {supportEmail && (
+              <a href={`mailto:${supportEmail}`} className="hover:text-cream transition-colors">Support</a>
+            )}
           </div>
         </div>
       </div>

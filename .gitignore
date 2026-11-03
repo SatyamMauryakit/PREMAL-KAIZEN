@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
-pnpm-lock.yaml
+# pnpm-lock.yaml is intentionally tracked (not ignored) - it's the only thing that
+# makes `pnpm install --frozen-lockfile` actually reproducible in CI/Docker. Only the
+# OTHER package managers' lockfiles are excluded, since this project only uses pnpm.
 yarn.lock
 package-lock.json
 
@@ -49,3 +51,22 @@ apps/api/uploads/*
 !apps/api/uploads/.gitkeep
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
+apps/api/prisma/backups/
+
+# Throwaway schemas/generated clients used to test an alternate datasource (e.g. Postgres
+# migration testing) - these must never be committed or relied upon by the real app.
+apps/api/prisma/schema.*-test.prisma
+apps/api/prisma/generated/
+
+# deploy.sh's real Kubernetes Secret, generated locally from 02-secret.example.yaml on
+# the EC2 host - contains real values once edited, must never be committed. The
+# .example template (placeholders only) IS tracked.
+deploy/k8s/02-secret.yaml
+# Manifests rendered by deploy.sh (e.g. the ConfigMap with the real detected EC2 IP
+# substituted in) - regenerated on every run, not meant to be tracked.
+deploy/.rendered/
+
+# Stray duplicate of a migration already tracked properly under
+# apps/api/prisma/migrations/ - schema-only, no secrets, just not meant to be committed
+# again from the repo root.
+razorpay_migration.sql

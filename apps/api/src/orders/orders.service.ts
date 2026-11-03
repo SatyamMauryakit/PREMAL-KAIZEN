@@ -1,6 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromotionsService } from '../promotions/promotions.service';
+import { SettingsService } from '../settings/settings.service';
+import { RazorpayService } from '../payments/razorpay.service';
+import { EmailService } from '../email/email.service';
 
 const VALID_ORDER_STATUSES = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 const VALID_PAYMENT_STATUSES = ['pending', 'completed', 'failed', 'refunded'];
@@ -19,7 +22,15 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService, private promotionsService: PromotionsService) {}
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private promotionsService: PromotionsService,
+    private settingsService: SettingsService,
+    private razorpayService: RazorpayService,
+    private emailService: EmailService,
+  ) {}
 
   async findAll(filters?: {
     page?: number;
@@ -59,7 +70,7 @@ export class OrdersService {
         where: whereClause,
         skip,
         take: limit,
-        include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+        include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.order.count({ where: whereClause }),
@@ -76,7 +87,7 @@ export class OrdersService {
   async findById(id: string) {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: { items: { include: { product: true } }, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      include: { items: { include: { product: true } }, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     if (!order) {
@@ -89,11 +100,29 @@ export class OrdersService {
   async findByOrderNumber(orderNumber: string) {
     const order = await this.prisma.order.findUnique({
       where: { orderNumber },
-      include: { items: { include: { product: true } }, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      include: { items: { include: { product: true } }, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     if (!order) {
       throw new NotFoundException(`Order ${orderNumber} not found`);
+    }
+
+    return order;
+  }
+
+  /**
+   * Guest order tracking - no login required, but the caller must know both the
+   * order number AND the exact email on the order, so this can't be used to
+   * enumerate or browse other customers' orders.
+   */
+  async findForGuestTracking(orderNumber: string, email: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      include: { items: { include: { product: true } }, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+    });
+
+    if (!order || order.user.email.toLowerCase() !== email.trim().toLowerCase()) {
+      throw new NotFoundException('Order not found. Please check your order number and email.');
     }
 
     return order;
@@ -143,6 +172,52 @@ export class OrdersService {
 
     const subtotal = lineItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
+    // Resolve the delivery address: either a saved address the user owns, or a new
+    // one submitted inline at checkout (which we persist so it can be reused and so
+    // the order has a permanent, real delivery address rather than discarding it).
+    let resolvedAddressId: string | null = null;
+    if (data.addressId) {
+      const existing = await this.prisma.address.findUnique({ where: { id: data.addressId } });
+      if (!existing || existing.userId !== userId) {
+        throw new BadRequestException('Address not found');
+      }
+      resolvedAddressId = existing.id;
+    } else if (data.shippingAddress) {
+      const a = data.shippingAddress;
+      const required = ['firstName', 'lastName', 'phoneNumber', 'street1', 'city', 'state', 'postalCode', 'country'];
+      for (const field of required) {
+        if (!a[field]) {
+          throw new BadRequestException(`Shipping address ${field} is required`);
+        }
+      }
+      const mobileDigits = String(a.phoneNumber).replace(/[\s-]/g, '').replace(/^(\+?91|0)/, '');
+      if (!/^[6-9]\d{9}$/.test(mobileDigits)) {
+        throw new BadRequestException('Enter a valid 10-digit Indian mobile number');
+      }
+      if (!/^[1-9]\d{5}$/.test(String(a.postalCode).trim())) {
+        throw new BadRequestException('Enter a valid 6-digit PIN code');
+      }
+
+      const created = await this.prisma.address.create({
+        data: {
+          userId,
+          label: a.label || 'Checkout',
+          firstName: a.firstName,
+          lastName: a.lastName,
+          phoneNumber: a.phoneNumber,
+          street1: a.street1,
+          street2: a.street2 || null,
+          landmark: a.landmark || null,
+          city: a.city,
+          state: a.state,
+          postalCode: a.postalCode,
+          country: a.country,
+          isDefault: false,
+        },
+      });
+      resolvedAddressId = created.id;
+    }
+
     let discount = 0;
     let promotionId: string | null = null;
     let couponCode: string | null = null;
@@ -166,19 +241,75 @@ export class OrdersService {
     }
 
     const taxableAmount = Math.max(0, subtotal - discount);
-    const tax = Math.round(taxableAmount * 0.18);
-    const shipping = subtotal > 10000 ? 0 : 100;
+
+    // GST: rate/mode come from real store settings, never a hardcoded assumption.
+    // The split (CGST+SGST vs IGST) depends on the business's registered state, which
+    // the admin must configure - if it's missing we still charge the configured rate
+    // but cannot determine the split, so cgst/sgst/igst stay 0 rather than guessing.
+    const settings = await this.settingsService.getSettings();
+    const taxRate = settings.defaultTaxRate || 0;
+    const taxMode = settings.taxCalculationMode || 'exclusive';
+
+    let tax = 0;
+    if (taxRate > 0) {
+      tax = taxMode === 'inclusive'
+        ? Math.round((taxableAmount * taxRate) / (100 + taxRate))
+        : Math.round((taxableAmount * taxRate) / 100);
+    }
+
+    let cgst = 0;
+    let sgst = 0;
+    let igst = 0;
+
+    if (tax > 0 && settings.businessState) {
+      let shippingState: string | null = null;
+      if (resolvedAddressId) {
+        const address = await this.prisma.address.findUnique({ where: { id: resolvedAddressId } });
+        shippingState = address?.state || null;
+      }
+
+      if (shippingState) {
+        const isIntraState = shippingState.trim().toLowerCase() === settings.businessState.trim().toLowerCase();
+        if (isIntraState) {
+          cgst = Math.round(tax / 2);
+          sgst = tax - cgst;
+        } else {
+          igst = tax;
+        }
+      }
+    }
+
+    // A payment method is only accepted if it's actually enabled server-side - never
+    // let the client force an unconfigured/disabled method through. Razorpay is the
+    // only online provider (Stripe was never actively integrated - no SDK, no checkout
+    // flow, ever existed for it, so it is not offered here regardless of its legacy
+    // settings flag). COD is its own independent toggle, not tied to any gateway.
+    const availablePaymentMethods: string[] = [];
+    if (settings.codEnabled !== false) availablePaymentMethods.push('cod');
+    if (settings.razorpayEnabled) availablePaymentMethods.push('upi', 'netbanking', 'card');
+
+    const requestedPaymentMethod = data.paymentMethod || 'cod';
+    if (!availablePaymentMethods.includes(requestedPaymentMethod)) {
+      throw new BadRequestException(`Payment method "${requestedPaymentMethod}" is not available`);
+    }
+
+    const shippingMethods: Array<{ id: string; price: number; enabled: boolean; freeShippingThreshold?: number }> = settings.shippingMethods || [];
+    const requestedMethod = shippingMethods.find((m) => m.id === data.shippingMethod && m.enabled);
+    const fallbackMethod = shippingMethods.find((m) => m.enabled);
+    const chosenMethod = requestedMethod || fallbackMethod;
+
+    const paymentMethod = requestedPaymentMethod;
+    const shippingMethod = chosenMethod?.id || 'standard';
+    const shipping = chosenMethod
+      ? (chosenMethod.freeShippingThreshold && subtotal >= chosenMethod.freeShippingThreshold ? 0 : chosenMethod.price)
+      : 0;
+
     const total = taxableAmount + tax + shipping;
 
     const timestamp = new Date();
     const year = timestamp.getFullYear();
     const random = Math.floor(Math.random() * 100000).toString().padStart(6, '0');
     const orderNumber = `PK-${year}-${random}`;
-
-    const PAYMENT_METHODS = ['card', 'upi', 'netbanking', 'cod'];
-    const SHIPPING_METHODS = ['standard', 'express', 'overnight'];
-    const paymentMethod = PAYMENT_METHODS.includes(data.paymentMethod) ? data.paymentMethod : 'cod';
-    const shippingMethod = SHIPPING_METHODS.includes(data.shippingMethod) ? data.shippingMethod : 'standard';
 
     const order = await this.prisma.$transaction(async (tx) => {
       const created = await tx.order.create({
@@ -193,11 +324,15 @@ export class OrdersService {
           discount,
           shipping,
           tax,
+          cgst,
+          sgst,
+          igst,
+          taxRate,
           total,
           promotionId,
           couponCode,
           notes: data.notes || null,
-          addressId: data.addressId || null,
+          addressId: resolvedAddressId,
           items: {
             create: lineItems.map((i) => ({
               productId: i.productId,
@@ -217,7 +352,60 @@ export class OrdersService {
       return created;
     });
 
-    return this.findById(order.id);
+    if (paymentMethod === 'cod') {
+      // COD orders are complete as soon as they're created - payment is collected on
+      // delivery, not here. Send the placement email now; never claim payment succeeded.
+      await this.sendCodConfirmationEmail(order.id);
+      return this.findById(order.id);
+    }
+
+    // Online payment methods: the order is created as pending/unpaid, and a matching
+    // Razorpay order is created so the frontend can open Checkout. No confirmation
+    // email is sent yet - that only happens once payment is verified.
+    try {
+      const razorpayOrder = await this.razorpayService.createOrder(order.total, 'INR', order.orderNumber);
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { razorpayOrderId: razorpayOrder.id },
+      });
+      const full = await this.findById(order.id);
+      return { ...full, razorpay: { orderId: razorpayOrder.id, amount: razorpayOrder.amount, currency: razorpayOrder.currency, keyId: this.razorpayService.getPublicKeyId() } };
+    } catch (err) {
+      // Online payment can't proceed - don't leave an unpayable pending order behind.
+      await this.prisma.order.delete({ where: { id: order.id } }).catch(() => undefined);
+      this.logger.error(`Failed to create Razorpay order: ${(err as Error).message}`);
+      throw new BadRequestException('Online payment is not available right now. Please try Cash on Delivery or try again later.');
+    }
+  }
+
+  private async sendCodConfirmationEmail(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: { include: { product: true } }, user: true, address: true },
+    });
+    if (!order || order.orderEmailSentAt) return;
+
+    const sent = await this.emailService.sendCodOrderPlacedEmail({
+      toEmail: order.user.email,
+      customerName: order.user.firstName || order.user.email,
+      orderNumber: order.orderNumber,
+      orderId: order.id,
+      paymentMethod: order.paymentMethod,
+      paymentStatus: order.paymentStatus,
+      total: order.total,
+      items: order.items.map((i) => ({
+        name: i.product?.name || 'Product',
+        quantity: i.quantity,
+        price: i.price,
+        selectedSize: i.selectedSize,
+        selectedColor: i.selectedColor,
+      })),
+      shippingSummary: order.address ? `${order.address.city}, ${order.address.state} ${order.address.postalCode}` : undefined,
+    });
+
+    if (sent) {
+      await this.prisma.order.update({ where: { id: order.id }, data: { orderEmailSentAt: new Date() } });
+    }
   }
 
   async updateStatus(id: string, newStatus: string) {
@@ -245,7 +433,7 @@ export class OrdersService {
         status: newStatus,
         updatedAt: new Date(),
       },
-      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;
@@ -268,7 +456,7 @@ export class OrdersService {
         paymentStatus,
         updatedAt: new Date(),
       },
-      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;
@@ -289,7 +477,7 @@ export class OrdersService {
         estimatedDelivery: data.estimatedDelivery || order.estimatedDelivery,
         updatedAt: new Date(),
       },
-      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;
@@ -308,7 +496,7 @@ export class OrdersService {
         internalNotes: notes,
         updatedAt: new Date(),
       },
-      include: { items: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
     });
 
     return updated;

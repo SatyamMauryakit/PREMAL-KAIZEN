@@ -5,20 +5,25 @@ import { useCheckout } from '@/lib/checkout-context';
 import { useAuth } from '@/lib/auth-context';
 import { formatPrice } from '@/lib/pricing';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getCheckoutSettings } from '@/lib/checkout-settings';
 
 export default function CartReview() {
   const { items } = useCart();
   const { goToStep, appliedCoupon, couponError, isApplyingCoupon, applyCoupon, removeCoupon } = useCheckout();
   const { user } = useAuth();
   const [couponInput, setCouponInput] = useState('');
+  const [taxRate, setTaxRate] = useState(0);
+
+  useEffect(() => {
+    getCheckoutSettings().then((s) => setTaxRate(s.taxRate)).catch(() => setTaxRate(0));
+  }, []);
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const discount = appliedCoupon?.discountAmount || 0;
   const taxable = Math.max(0, subtotal - discount);
-  const shipping = subtotal > 10000 ? 0 : 100;
-  const tax = Math.round(taxable * 0.18);
-  const total = taxable + tax + shipping;
+  const tax = Math.round((taxable * taxRate) / 100);
+  const total = taxable + tax;
 
   const handleApplyCoupon = () => {
     if (!couponInput.trim()) return;
@@ -118,14 +123,14 @@ export default function CartReview() {
               )}
               <div className="flex justify-between">
                 <span className="text-gray-700">Shipping</span>
-                <span className="font-medium text-black">{shipping === 0 ? 'FREE' : formatPrice(shipping)}</span>
+                <span className="font-medium text-gray-500">Calculated at next step</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-700">Tax (18%)</span>
+                <span className="text-gray-700">{taxRate > 0 ? `GST (${taxRate}%)` : 'GST'}</span>
                 <span className="font-medium text-black">{formatPrice(tax)}</span>
               </div>
               <div className="flex justify-between pt-4 border-t border-gray-300">
-                <span className="font-bold text-black">Total</span>
+                <span className="font-bold text-black">Total (excl. shipping)</span>
                 <span className="font-bold text-lg text-black">{formatPrice(total)}</span>
               </div>
             </div>

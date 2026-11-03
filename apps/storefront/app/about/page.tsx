@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { Logo } from '@/components/Logo';
 
 export default function AboutPage() {
   return (
@@ -117,7 +116,7 @@ export default function AboutPage() {
       <section className="max-w-5xl mx-auto px-4 sm:px-6 md:px-8 py-20">
         <div className="text-center">
           <div className="mb-8 flex justify-center">
-            <Logo className="w-16 h-16 text-black" />
+            <img src="/logo/logo-stacked-black.png" alt="PREMAL KAIZEN" className="h-20 w-auto" />
           </div>
           <h2 className="text-5xl font-bold text-black mb-6">Wear Your Vibe.<br />Own Your Story.</h2>
           <p className="text-xl text-gray-dark max-w-2xl mx-auto leading-relaxed">

@@ -6,19 +6,29 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useCart } from '@/lib/cart-context';
 import { useWishlist } from '@/lib/wishlist-context';
 import { useAuth } from '@/lib/auth-context';
-import { Logo } from './Logo';
 
 export const Header: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [cartCount, setCartCount] = useState(0);
   const [wishlistCount, setWishlistCount] = useState(0);
   const [isHydrated, setIsHydrated] = useState(false);
   const cart = useCart();
   const wishlist = useWishlist();
   const { user, logout } = useAuth();
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const query = searchQuery.trim();
+    setSearchOpen(false);
+    if (query) {
+      router.push(`/shop?q=${encodeURIComponent(query)}`);
+    }
+  };
 
   // Update cart and wishlist counts (client-side only to avoid hydration mismatch)
   useEffect(() => {
@@ -33,13 +43,12 @@ export const Header: React.FC = () => {
       <header className="fixed top-0 left-0 right-0 z-40 bg-black text-cream py-3 px-4 sm:px-6 md:px-8 border-b border-neutral-800 min-h-16">
         <div className="flex items-center justify-between gap-4 md:gap-8 h-full">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 md:gap-3 flex-shrink-0 hover:opacity-80 transition-opacity" style={{ color: '#F5F1ED' }}>
-            <div className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center flex-shrink-0" style={{ color: '#F5F1ED' }}>
-              <Logo className="w-full h-full" />
-            </div>
-            <span className="text-xs md:text-sm font-bold tracking-widest uppercase whitespace-nowrap" style={{ color: '#F5F1ED' }}>
-              PREMAL KAIZEN
-            </span>
+          <Link href="/" className="flex items-center flex-shrink-0 hover:opacity-80 transition-opacity">
+            <img
+              src="/logo/logo-wordmark-white.png"
+              alt="PREMAL KAIZEN"
+              className="h-6 md:h-7 w-auto"
+            />
           </Link>
 
           {/* Desktop Navigation */}
@@ -72,19 +81,44 @@ export const Header: React.FC = () => {
           {/* Icons */}
           <div className="flex items-center gap-4 md:gap-6 lg:gap-8 ml-auto flex-shrink-0" style={{ color: '#F5F1ED' }}>
             {/* Search Icon */}
-            <button
-              className="w-6 h-6 flex items-center justify-center text-cream hover:opacity-70 transition-opacity flex-shrink-0 p-0"
-              aria-label="Search"
-              type="button"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-            </button>
+            <div className="relative">
+              <button
+                className="w-6 h-6 flex items-center justify-center text-cream hover:opacity-70 transition-opacity flex-shrink-0 p-0"
+                aria-label="Search"
+                type="button"
+                onClick={() => setSearchOpen(!searchOpen)}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+              </button>
+
+              {searchOpen && (
+                <form
+                  onSubmit={handleSearchSubmit}
+                  className="absolute right-0 mt-2 w-64 bg-neutral-800 rounded-lg shadow-lg p-2 z-50 flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search products..."
+                    autoFocus
+                    className="flex-1 px-3 py-2 rounded bg-neutral-900 text-cream text-sm placeholder-gray-500 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="px-3 py-2 bg-cream text-black text-sm font-medium rounded hover:bg-opacity-90 transition-colors"
+                  >
+                    Go
+                  </button>
+                </form>
+              )}
+            </div>
 
             {/* Account Icon / User Menu */}
             <div className="relative">

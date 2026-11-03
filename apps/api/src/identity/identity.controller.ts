@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, Request, Res, UseGuards, BadRequestException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { IdentityService } from './identity.service';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -16,6 +17,7 @@ export class IdentityController {
    * POST /api/auth/register
    * Register new customer
    */
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
   async register(
     @Body() body: { email: string; password: string; firstName?: string; lastName?: string },
@@ -50,6 +52,7 @@ export class IdentityController {
    * Create the first administrator. Self-disables once an admin exists,
    * so this is safe to expose without authentication.
    */
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('admin/bootstrap')
   async bootstrapFirstAdmin(
     @Body() body: { email: string; password: string; firstName?: string; lastName?: string },
@@ -94,6 +97,7 @@ export class IdentityController {
    * POST /api/auth/login
    * Login customer
    */
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('login')
   async login(@Body() body: { email: string; password: string }, @Res() res: Response) {
     if (!body.email || !body.password) {
@@ -191,6 +195,7 @@ export class IdentityController {
    * POST /api/auth/request-password-reset
    * Request password reset email
    */
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('request-password-reset')
   async requestPasswordReset(@Body() body: { email: string }, @Res() res: Response) {
     if (!body.email) {
@@ -209,6 +214,7 @@ export class IdentityController {
    * POST /api/auth/reset-password
    * Reset password with token
    */
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('reset-password')
   async resetPassword(@Body() body: { token: string; newPassword: string }, @Res() res: Response) {
     if (!body.token || !body.newPassword) {

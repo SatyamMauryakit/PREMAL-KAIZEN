@@ -24,5 +24,7 @@ npm-debug.log*
 yarn-debug.log*
 
 # Prisma
-prisma/migrations/
+# migrations/ is intentionally NOT ignored - those .sql files are the real, required
+# schema history and must be tracked, not regenerated. Only the generated client
+# output cache is ignored here.
 .prisma/

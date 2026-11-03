@@ -1,7 +1,5 @@
 'use client';
 
-import { SIZES, COLORS } from '@/lib/products';
-
 interface FilterSidebarProps {
   selectedCategories: string[];
   selectedSizes: string[];
@@ -17,6 +15,10 @@ interface FilterSidebarProps {
   onClose?: () => void;
   /** Category options derived from the live catalog (replaces any hardcoded list). */
   categories: Array<{ id: string; label: string }>;
+  /** Size options derived from the live catalog. */
+  sizes: string[];
+  /** Color options (with swatches) derived from the live catalog. */
+  colors: Array<{ id: string; label: string; hex: string }>;
   /** Price slider bounds derived from the live catalog. */
   priceRange: { min: number; max: number };
 }
@@ -35,6 +37,8 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
   isMobile = false,
   onClose,
   categories,
+  sizes,
+  colors,
   priceRange,
 }) => {
   const toggleCategory = (category: string) => {
@@ -114,10 +118,11 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
         </div>
 
         {/* Size Filter */}
+        {sizes.length > 0 && (
         <div className="mb-8">
           <h3 className="font-bold text-black text-sm mb-3">SIZE</h3>
           <div className="flex flex-wrap gap-2">
-            {SIZES.map((size) => (
+            {sizes.map((size) => (
               <button
                 key={size}
                 onClick={() => toggleSize(size)}
@@ -132,6 +137,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             ))}
           </div>
         </div>
+        )}
 
         {/* Price Filter */}
         <div className="mb-8">
@@ -146,9 +152,9 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
               className="w-full"
             />
             <div className="flex gap-2 text-xs">
-              <span className="text-gray-dark">¥{priceMin.toLocaleString('en-IN')}</span>
+              <span className="text-gray-dark">₹{priceMin.toLocaleString('en-IN')}</span>
               <span className="text-gray-dark">—</span>
-              <span className="text-gray-dark">¥{priceMax.toLocaleString('en-IN')}</span>
+              <span className="text-gray-dark">₹{priceMax.toLocaleString('en-IN')}</span>
             </div>
             <input
               type="range"
@@ -162,10 +168,11 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
         </div>
 
         {/* Color Filter */}
+        {colors.length > 0 && (
         <div className="mb-8">
           <h3 className="font-bold text-black text-sm mb-3">COLOR</h3>
           <div className="flex flex-wrap gap-3">
-            {COLORS.map((color) => (
+            {colors.map((color) => (
               <button
                 key={color.id}
                 onClick={() => toggleColor(color.id)}
@@ -181,6 +188,7 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({
             ))}
           </div>
         </div>
+        )}
 
         {/* Clear All */}
         {hasActiveFilters && (

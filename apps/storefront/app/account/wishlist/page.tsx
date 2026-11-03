@@ -2,9 +2,21 @@
 
 import Link from 'next/link';
 import { useWishlist } from '@/lib/wishlist-context';
+import { useCart } from '@/lib/cart-context';
 
 export default function WishlistPage() {
-  const { items } = useWishlist();
+  const { items, removeItem } = useWishlist();
+  const { addItem } = useCart();
+
+  const handleAddToCart = (item: (typeof items)[0]) => {
+    addItem({
+      productId: item.productId,
+      name: item.name,
+      price: item.price,
+      image: item.image,
+      quantity: 1,
+    });
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-md p-8">
@@ -29,9 +41,20 @@ export default function WishlistPage() {
               <div className="p-4">
                 <h3 className="font-semibold text-black mb-2">{item.name}</h3>
                 <p className="text-beige font-bold mb-4">₹{(item.price / 100).toLocaleString('en-IN')}</p>
-                <button className="w-full bg-black text-cream py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">
-                  Add to Cart
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => handleAddToCart(item)}
+                    className="w-full bg-black text-cream py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors"
+                  >
+                    Add to Cart
+                  </button>
+                  <button
+                    onClick={() => removeItem(item.productId)}
+                    className="w-full border border-black text-black py-2 rounded-lg font-medium hover:bg-black hover:text-cream transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             </div>
           ))}

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { use, useEffect, useState } from 'react';
 import { formatPrice } from '@/lib/pricing';
+import { useCart } from '@/lib/cart-context';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
@@ -25,6 +26,15 @@ export default function OrderConfirmationPage({ params }: OrderConfirmationPageP
   const resolvedParams = params instanceof Promise ? use(params) : params;
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { clearCart } = useCart();
+
+  // Cleared here (once the confirmation page itself has loaded) rather than on the
+  // checkout page right before navigating away - doing it there raced against the
+  // checkout page's own "redirect to /cart when empty" effect and could bounce the
+  // customer back to an empty cart page instead of their order confirmation.
+  useEffect(() => {
+    clearCart();
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('sessionToken');

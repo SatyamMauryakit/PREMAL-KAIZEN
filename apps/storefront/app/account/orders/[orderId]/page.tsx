@@ -75,7 +75,7 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
         <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-6 mb-6">
           <div>
             <h1 className="text-3xl font-bold text-black mb-2">Order {order.orderNumber}</h1>
-            <p className="text-gray-600">{new Date(order.createdAt).toLocaleDateString()}</p>
+            <p className="text-gray-600">{new Date(order.createdAt).toLocaleDateString('en-IN')}</p>
           </div>
           <div className="text-right">
             <span className={`inline-block px-4 py-2 rounded text-sm font-bold ${
@@ -106,7 +106,10 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
                   </div>
                   <div className={idx <= statusIndex ? 'text-black' : 'text-gray-500'}>
                     <p className="font-medium capitalize">{status.replace('_', ' ')}</p>
-                    {timeline[idx] && <p className="text-sm text-gray-600">{new Date(timeline[idx].timestamp).toLocaleString()}</p>}
+                    {(() => {
+                      const event = timeline.find((t) => t.status === status);
+                      return event && <p className="text-sm text-gray-600">{new Date(event.timestamp).toLocaleString()}</p>;
+                    })()}
                   </div>
                 </div>
               ))}
