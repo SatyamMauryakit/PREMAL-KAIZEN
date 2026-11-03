@@ -29,6 +29,14 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
+# Unlike the storefront, the admin app has no static public assets (verified - nothing
+# in apps/admin/app references anything under public/, and the folder is genuinely
+# empty). Git never tracks empty directories, so on a fresh clone (e.g. the EC2
+# `git clone` in deploy.sh) apps/admin/public doesn't exist at all, which made the
+# runtime stage's COPY below fail. This ensures the (empty) directory exists in the
+# build stage regardless - no fake assets created, just the same empty folder that
+# already exists in the working tree.
+RUN mkdir -p apps/admin/public
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_OUTPUT_STANDALONE=true
