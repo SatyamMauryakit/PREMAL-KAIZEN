@@ -242,7 +242,7 @@ export default function PromotionsPage() {
                         {promo.perCustomerLimit ?? '-'}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-dark">
-                        {promo.expiryDate ? new Date(promo.expiryDate).toLocaleDateString() : '-'}
+                        {promo.expiryDate ? new Date(promo.expiryDate).toLocaleDateString('en-IN') : '-'}
                       </td>
                       <td className="px-6 py-4 text-sm space-x-2">
                         <Link

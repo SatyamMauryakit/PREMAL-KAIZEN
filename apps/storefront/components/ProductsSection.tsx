@@ -8,6 +8,7 @@ interface ApiProduct {
   id: string;
   name: string;
   price: number;
+  category?: { name: string } | null;
   images?: Array<{ url: string; alt?: string }>;
 }
 
@@ -60,7 +61,8 @@ export const ProductsSection: React.FC = () => {
                 key={product.id}
                 id={product.id}
                 name={product.name}
-                price={`HK$${(product.price / 100).toLocaleString('en-HK', { minimumFractionDigits: 0 })}`}
+                price={product.price}
+                category={product.category?.name || ''}
                 image={product.images?.[0]?.url}
                 href={`/products/${product.id}`}
               />

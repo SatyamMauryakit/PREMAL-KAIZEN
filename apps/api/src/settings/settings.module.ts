@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { SettingsService } from './settings.service';
-import { SettingsController } from './settings.controller';
+import { SettingsController, PublicSettingsController } from './settings.controller';
+import { RazorpayModule } from '../payments/razorpay.module';
 
 @Module({
-  controllers: [SettingsController],
+  imports: [RazorpayModule],
+  controllers: [SettingsController, PublicSettingsController],
   providers: [SettingsService],
   exports: [SettingsService],
 })

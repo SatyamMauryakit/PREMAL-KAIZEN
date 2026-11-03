@@ -3,36 +3,41 @@
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
-/* Reset and base styles */
-html {
-  scroll-behavior: smooth;
-}
+/* Reset and base styles - wrapped in Tailwind's "base" cascade layer so
+   utility classes (e.g. an explicit h-6 on an <img>) still win over these
+   defaults. Unlayered CSS always beats layered CSS regardless of specificity,
+   so without this, these rules would override every Tailwind utility. */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
 
-body {
-  background-color: #F5F1ED;
-  color: #000000;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Roboto', sans-serif;
-}
+  body {
+    background-color: #F5F1ED;
+    color: #000000;
+    font-family: system-ui, -apple-system, 'Segoe UI', 'Roboto', sans-serif;
+  }
 
-/* Focus visible for keyboard navigation */
-:focus-visible {
-  outline: 2px solid #000000;
-  outline-offset: 2px;
-}
+  /* Focus visible for keyboard navigation */
+  :focus-visible {
+    outline: 2px solid #000000;
+    outline-offset: 2px;
+  }
 
-/* Remove default focus outline, use focus-visible instead */
-button:focus,
-a:focus,
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-}
+  /* Remove default focus outline, use focus-visible instead */
+  button:focus,
+  a:focus,
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+  }
 
-/* Images should be responsive */
-img {
-  max-width: 100%;
-  height: auto;
+  /* Images should be responsive by default - an explicit size utility overrides this */
+  img {
+    max-width: 100%;
+    height: auto;
+  }
 }
 
 /* Container queries support */

@@ -75,7 +75,7 @@ export default function OrdersPage() {
                       {order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1).replace('_', ' ')}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-600">{new Date(order.createdAt).toLocaleDateString()}</p>
+                  <p className="text-sm text-gray-600">{new Date(order.createdAt).toLocaleDateString('en-IN')}</p>
                   <p className="text-sm text-gray-600 mt-1">{order.items.length} item{order.items.length !== 1 ? 's' : ''}</p>
                 </div>
                 <div className="text-right">

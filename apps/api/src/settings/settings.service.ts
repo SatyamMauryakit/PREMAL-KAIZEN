@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RazorpayService } from '../payments/razorpay.service';
 
 export interface ShippingMethod {
   id: string;
@@ -16,6 +17,8 @@ export interface StoreSettingsDTO {
   storeEmail?: string;
   storePhone?: string;
   businessAddress?: string;
+  businessState?: string;
+  gstin?: string;
   timezone?: string;
   locale?: string;
   currency?: string;
@@ -32,6 +35,7 @@ export interface StoreSettingsDTO {
   lowStockNotificationsEnabled?: boolean;
   stripeEnabled?: boolean;
   razorpayEnabled?: boolean;
+  codEnabled?: boolean;
   emailNotificationsEnabled?: boolean;
   smsNotificationsEnabled?: boolean;
 }
@@ -40,7 +44,10 @@ export interface StoreSettingsDTO {
 export class SettingsService {
   private readonly SINGLETON_ID = 'singleton';
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private razorpayService: RazorpayService,
+  ) {}
 
   async getSettings() {
     let settings = await this.prisma.storeSettings.findUnique({
@@ -195,6 +202,28 @@ export class SettingsService {
       { maintenanceMode: enabled, maintenanceMessage: message },
       adminId
     );
+  }
+
+  /**
+   * Real, read-only provider configuration status for the admin Payment Settings UI -
+   * never exposes the actual key/secret values, only whether they're present. The
+   * website-level enable/disable toggle (razorpayEnabled) is independent of this:
+   * an admin can enable Razorpay in settings before credentials are configured, but
+   * orders.service.ts will refuse to actually create a Razorpay order until both the
+   * toggle is on AND the credentials are present.
+   */
+  async getPaymentProviderStatus() {
+    const settings = await this.getSettings();
+    return {
+      razorpay: {
+        enabled: !!settings.razorpayEnabled,
+        configured: this.razorpayService.isConfigured(),
+        webhookConfigured: this.razorpayService.isWebhookConfigured(),
+      },
+      cod: {
+        enabled: settings.codEnabled !== false,
+      },
+    };
   }
 
   async getAuditLog(limit: number = 50, offset: number = 0) {

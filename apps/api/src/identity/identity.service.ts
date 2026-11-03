@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { maskEmail } from '../common/logging/redact';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
 
@@ -208,9 +209,13 @@ export class IdentityService {
       where: { email: email.toLowerCase() },
     });
 
-    // For security, don't reveal if email exists
+    // For security, the response is identical whether or not the email is
+    // registered - distinct wording would let an attacker enumerate accounts
+    // even though both cases already share the same 200 status.
+    const message = 'If an account exists for this email, a password reset link has been sent.';
+
     if (!user) {
-      return { message: 'If the email exists, a reset link has been sent' };
+      return { message };
     }
 
     // Create reset token
@@ -218,9 +223,9 @@ export class IdentityService {
 
     // TODO: Send email with reset token
     // For now, in development mode, log the token
-    console.log(`[DEV] Password reset token for ${email}: check database`);
+    console.log(`[DEV] Password reset requested for ${maskEmail(email)} - token stored in database, not logged`);
 
-    return { message: 'Password reset link sent to your email' };
+    return { message };
   }
 
   /**

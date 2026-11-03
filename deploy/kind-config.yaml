@@ -1,0 +1,34 @@
+# kind (Kubernetes-in-Docker) single-node cluster config for PREMAL KAIZEN on one EC2 host.
+#
+# Two things this file exists to get right (both easy to get wrong with kind):
+#
+# 1. extraPortMappings - a NodePort Service inside kind is NOT automatically reachable
+#    from outside the Docker host. kind's "node" is itself a Docker container; a NodePort
+#    only opens on that container's own network namespace unless the kind cluster config
+#    explicitly maps the container port through to the Docker host (this EC2 instance).
+#    The three ports below match the fixed NodePorts used in deploy/k8s/*-service.yaml.
+#
+# 2. extraMounts - without this, anything written inside the cluster (the SQLite file,
+#    uploaded product images) lives only in the kind node container's writable layer.
+#    That survives a pod restart, but not `kind delete cluster`, not a node container
+#    recreation, and is not something you can find/back up from the EC2 host directly.
+#    Mounting a real EC2 host directory through to a fixed path inside the node, and
+#    pointing the PersistentVolume in deploy/k8s/03-pvc.yaml at that same path, makes
+#    the data actually live on the EC2 instance's own disk.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
+      - containerPort: 30001
+        hostPort: 30001
+        protocol: TCP
+      - containerPort: 30002
+        hostPort: 30002
+        protocol: TCP
+    extraMounts:
+      - hostPath: /opt/premal-kaizen/data
+        containerPath: /mnt/premal-data

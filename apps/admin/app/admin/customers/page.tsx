@@ -174,7 +174,7 @@ export default function CustomersPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-medium">
-                        {new Date(customer.createdAt).toLocaleDateString()}
+                        {new Date(customer.createdAt).toLocaleDateString('en-IN')}
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <Link

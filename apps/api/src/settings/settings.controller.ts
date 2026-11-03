@@ -3,6 +3,46 @@ import { SettingsService, StoreSettingsDTO, ShippingMethod } from './settings.se
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 
+/**
+ * Public, read-only checkout settings - no admin data (no GSTIN, no email/phone).
+ * Lets the storefront show real shipping methods, tax rate and payment-gateway
+ * availability instead of hardcoding assumptions the business hasn't configured.
+ */
+@Controller('api/storefront/settings')
+export class PublicSettingsController {
+  constructor(private settingsService: SettingsService) {}
+
+  @Get('checkout')
+  async getCheckoutSettings() {
+    const settings = await this.settingsService.getSettings();
+    return {
+      shippingMethods: (settings.shippingMethods || []).filter((m: ShippingMethod) => m.enabled),
+      taxRate: settings.defaultTaxRate || 0,
+      taxMode: settings.taxCalculationMode || 'exclusive',
+      razorpayEnabled: !!settings.razorpayEnabled,
+      codEnabled: settings.codEnabled !== false,
+      guestCheckoutEnabled: settings.guestCheckoutEnabled !== false,
+      minimumOrderValue: settings.minimumOrderValue || 0,
+      maintenanceMode: !!settings.maintenanceMode,
+    };
+  }
+
+  /**
+   * Real, admin-configured contact details - this is the only source the
+   * storefront's footer/contact/about pages should use, instead of a
+   * hardcoded guess at the business's real email or phone number.
+   */
+  @Get('contact')
+  async getContactSettings() {
+    const settings = await this.settingsService.getSettings();
+    return {
+      storeName: settings.storeName || 'PREMAL KAIZEN',
+      storeEmail: settings.storeEmail || '',
+      storePhone: settings.storePhone || '',
+    };
+  }
+}
+
 @UseGuards(AuthGuard, AdminGuard)
 @Controller('api/admin/settings')
 export class SettingsController {
@@ -125,5 +165,14 @@ export class SettingsController {
     const paise = parseInt(amount);
     const tax = await this.settingsService.calculateTax(paise);
     return { amount: paise, tax };
+  }
+
+  /**
+   * Real payment provider status for the Payment Settings UI - whether Razorpay
+   * credentials/webhook secret are actually present, never their values.
+   */
+  @Get('payment-providers')
+  async getPaymentProviderStatus() {
+    return this.settingsService.getPaymentProviderStatus();
   }
 }

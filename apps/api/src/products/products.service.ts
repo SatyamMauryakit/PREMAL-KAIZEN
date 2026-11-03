@@ -84,7 +84,19 @@ export class ProductsService {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
 
-    return this.deserialize(product);
+    // Real per-variant stock, when the business has configured it - a size/color
+    // with no inventory row here is treated as available (no tracking enabled for
+    // it yet), never as a fabricated stock count.
+    const inventory = await this.prisma.inventory.findMany({ where: { productId: id } });
+
+    return {
+      ...this.deserialize(product),
+      inventory: inventory.map((i) => ({
+        size: i.size,
+        color: i.color,
+        available: Math.max(0, i.onHand - i.reserved),
+      })),
+    };
   }
 
   /**

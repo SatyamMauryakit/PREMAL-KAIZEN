@@ -7,11 +7,13 @@ export interface User {
   email: string;
   firstName: string | null;
   lastName: string | null;
+  phoneNumber: string | null;
   emailVerified: string | null;
 }
 
 export interface AuthContextType {
   user: User | null;
+  sessionToken: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -20,6 +22,8 @@ export interface AuthContextType {
   verifyEmail: (token: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
+  updateProfile: (data: { firstName?: string; lastName?: string; phoneNumber?: string }) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -168,10 +172,46 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const updateProfile = async (data: { firstName?: string; lastName?: string; phoneNumber?: string }) => {
+    const response = await fetch(`${API_BASE}/api/customer/profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to update profile');
+    }
+
+    const updated = await response.json();
+    setUser((prev) => (prev ? { ...prev, ...updated } : prev));
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const response = await fetch(`${API_BASE}/api/customer/password`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to change password');
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
+        sessionToken,
         isLoading,
         isAuthenticated: !!user,
         login,
@@ -180,6 +220,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         verifyEmail,
         requestPasswordReset,
         resetPassword,
+        updateProfile,
+        changePassword,
       }}
     >
       {children}

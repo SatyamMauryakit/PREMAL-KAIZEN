@@ -1,30 +1,73 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { INDIAN_STATES, isValidIndianMobile, isValidIndianPincode } from '@/lib/india';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+
+interface Address {
+  id: string;
+  label: string;
+  firstName: string;
+  lastName: string;
+  phoneNumber: string;
+  street1: string;
+  street2?: string;
+  landmark?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  isDefault: boolean;
+}
+
+const emptyForm = {
+  label: '',
+  firstName: '',
+  lastName: '',
+  phoneNumber: '',
+  street1: '',
+  street2: '',
+  landmark: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'India',
+  isDefault: false,
+};
 
 export default function AddressesPage() {
-  const { isLoading } = useAuth();
-  const [addresses, setAddresses] = useState<any[]>([]);
+  const { isLoading: authLoading, sessionToken } = useAuth();
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [formData, setFormData] = useState(emptyForm);
 
-  const [formData, setFormData] = useState({
-    label: '',
-    firstName: '',
-    lastName: '',
-    phoneNumber: '',
-    street1: '',
-    street2: '',
-    city: '',
-    state: '',
-    postalCode: '',
-    country: 'India',
-    isDefault: false,
-  });
+  useEffect(() => {
+    if (!authLoading && sessionToken) {
+      loadAddresses();
+    }
+  }, [authLoading, sessionToken]);
+
+  const loadAddresses = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/customer/addresses`, {
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      if (!response.ok) throw new Error('Failed to load addresses');
+      setAddresses(await response.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load addresses');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
@@ -38,18 +81,38 @@ export default function AddressesPage() {
     e.preventDefault();
     setError('');
     setSuccess('');
-    setIsSaving(true);
 
+    if (!isValidIndianMobile(formData.phoneNumber)) {
+      setError('Enter a valid 10-digit Indian mobile number');
+      return;
+    }
+    if (!isValidIndianPincode(formData.postalCode)) {
+      setError('Enter a valid 6-digit PIN code');
+      return;
+    }
+
+    setIsSaving(true);
     try {
-      if (editingId) {
-        // TODO: Call API to update address
-        console.log('Update address:', formData);
-      } else {
-        // TODO: Call API to create address
-        console.log('Create address:', formData);
+      const url = editingId
+        ? `${API_BASE}/api/customer/addresses/${editingId}`
+        : `${API_BASE}/api/customer/addresses`;
+      const response = await fetch(url, {
+        method: editingId ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message || 'Failed to save address');
       }
+
       setSuccess(editingId ? 'Address updated successfully' : 'Address added successfully');
       resetForm();
+      await loadAddresses();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Operation failed');
     } finally {
@@ -57,25 +120,32 @@ export default function AddressesPage() {
     }
   };
 
+  const handleDelete = async (addressId: string) => {
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch(`${API_BASE}/api/customer/addresses/${addressId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message || 'Failed to delete address');
+      }
+      setSuccess('Address deleted successfully');
+      await loadAddresses();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete address');
+    }
+  };
+
   const resetForm = () => {
-    setFormData({
-      label: '',
-      firstName: '',
-      lastName: '',
-      phoneNumber: '',
-      street1: '',
-      street2: '',
-      city: '',
-      state: '',
-      postalCode: '',
-      country: 'India',
-      isDefault: false,
-    });
+    setFormData(emptyForm);
     setShowForm(false);
     setEditingId(null);
   };
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return <div className="text-center py-12">Loading...</div>;
   }
 
@@ -84,7 +154,7 @@ export default function AddressesPage() {
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-black">My Addresses</h2>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => (showForm ? resetForm() : setShowForm(true))}
           className="bg-black text-cream px-6 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors"
         >
           {showForm ? 'Cancel' : 'Add Address'}
@@ -166,7 +236,7 @@ export default function AddressesPage() {
 
               <div>
                 <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number *
+                  Mobile Number *
                 </label>
                 <input
                   id="phoneNumber"
@@ -184,7 +254,7 @@ export default function AddressesPage() {
 
             <div>
               <label htmlFor="street1" className="block text-sm font-medium text-gray-700 mb-2">
-                Street Address *
+                Flat / House No., Building *
               </label>
               <input
                 id="street1"
@@ -201,7 +271,7 @@ export default function AddressesPage() {
 
             <div>
               <label htmlFor="street2" className="block text-sm font-medium text-gray-700 mb-2">
-                Apartment, Suite, etc. (Optional)
+                Area, Street (Optional)
               </label>
               <input
                 id="street2"
@@ -211,6 +281,22 @@ export default function AddressesPage() {
                 onChange={handleChange}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
                 placeholder="Apartment 101"
+                disabled={isSaving}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="landmark" className="block text-sm font-medium text-gray-700 mb-2">
+                Landmark (Optional)
+              </label>
+              <input
+                id="landmark"
+                name="landmark"
+                type="text"
+                value={formData.landmark}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
+                placeholder="Near City Mall"
                 disabled={isSaving}
               />
             </div>
@@ -235,26 +321,29 @@ export default function AddressesPage() {
 
               <div>
                 <label htmlFor="state" className="block text-sm font-medium text-gray-700 mb-2">
-                  State *
+                  State / UT *
                 </label>
-                <input
+                <select
                   id="state"
                   name="state"
-                  type="text"
                   value={formData.state}
                   onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
-                  placeholder="Maharashtra"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent bg-white"
                   required
                   disabled={isSaving}
-                />
+                >
+                  <option value="">Select state</option>
+                  {INDIAN_STATES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="postalCode" className="block text-sm font-medium text-gray-700 mb-2">
-                  Postal Code *
+                  PIN Code *
                 </label>
                 <input
                   id="postalCode"
@@ -262,6 +351,7 @@ export default function AddressesPage() {
                   type="text"
                   value={formData.postalCode}
                   onChange={handleChange}
+                  maxLength={6}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
                   placeholder="400001"
                   required
@@ -350,8 +440,9 @@ export default function AddressesPage() {
                   </p>
                   <p className="text-gray-600 text-sm mb-1">{address.street1}</p>
                   {address.street2 && <p className="text-gray-600 text-sm mb-1">{address.street2}</p>}
+                  {address.landmark && <p className="text-gray-600 text-sm mb-1">Near {address.landmark}</p>}
                   <p className="text-gray-600 text-sm mb-1">
-                    {address.city}, {address.state} {address.postalCode}
+                    {address.city}, {address.state} - {address.postalCode}
                   </p>
                   <p className="text-gray-600 text-sm">{address.phoneNumber}</p>
                 </div>
@@ -359,18 +450,17 @@ export default function AddressesPage() {
                   <button
                     onClick={() => {
                       setEditingId(address.id);
-                      setFormData(address);
+                      setFormData({ ...emptyForm, ...address, street2: address.street2 || '', landmark: address.landmark || '' });
                       setShowForm(true);
+                      setError('');
+                      setSuccess('');
                     }}
                     className="text-blue-600 hover:underline text-sm"
                   >
                     Edit
                   </button>
                   <button
-                    onClick={() => {
-                      // TODO: Delete address
-                      console.log('Delete address:', address.id);
-                    }}
+                    onClick={() => handleDelete(address.id)}
                     className="text-red-600 hover:underline text-sm"
                   >
                     Delete

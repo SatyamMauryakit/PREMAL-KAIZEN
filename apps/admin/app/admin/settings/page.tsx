@@ -2,7 +2,8 @@
 
 import { Header } from '@/components/Header';
 import { useState, useEffect } from 'react';
-import { adminSettingsService, StoreSettings, ShippingMethod } from '@/lib/settings-service';
+import { adminSettingsService, StoreSettings, ShippingMethod, PaymentProviderStatus } from '@/lib/settings-service';
+import { INDIAN_STATES } from '@/lib/india';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
@@ -13,9 +14,10 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'regional' | 'shipping' | 'tax' | 'checkout' | 'notifications' | 'security'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'regional' | 'shipping' | 'tax' | 'payment' | 'checkout' | 'notifications' | 'security'>('general');
   const [formData, setFormData] = useState<Partial<StoreSettings>>({});
   const [shippingMethods, setShippingMethods] = useState<ShippingMethod[]>([]);
+  const [providerStatus, setProviderStatus] = useState<PaymentProviderStatus | null>(null);
   const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
@@ -69,6 +71,14 @@ export default function SettingsPage() {
       setMaintenanceEnabled(data.maintenanceMode || false);
       setMaintenanceMessage(data.maintenanceMessage || '');
       setError(null);
+
+      try {
+        const status = await adminSettingsService.getPaymentProviderStatus(token);
+        setProviderStatus(status);
+      } catch {
+        // Non-fatal - the rest of the settings page still works without this.
+        setProviderStatus(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
     } finally {
@@ -107,8 +117,18 @@ export default function SettingsPage() {
     handleInputChange('shippingMethods', updated);
   };
 
-  const formatPrice = (price: number) => {
-    return `₹${(price / 100).toLocaleString('en-IN', { minimumFractionDigits: 0 })}`;
+  // Disabling a payment method affects whether customers can check out at all -
+  // require an explicit confirmation before applying the change locally (it still
+  // isn't persisted until Save Settings is clicked).
+  const handleTogglePaymentMethod = (field: 'razorpayEnabled' | 'codEnabled', checked: boolean) => {
+    if (!checked) {
+      const label = field === 'razorpayEnabled' ? 'Razorpay online payments' : 'Cash on Delivery';
+      const confirmed = window.confirm(
+        `Disable ${label}? Customers will no longer be able to use this payment method at checkout once you save. Existing orders already placed with it are not affected.`
+      );
+      if (!confirmed) return;
+    }
+    handleInputChange(field, checked);
   };
 
   if (isLoading) {
@@ -151,6 +171,7 @@ export default function SettingsPage() {
               { id: 'regional', label: 'Regional' },
               { id: 'shipping', label: 'Shipping' },
               { id: 'tax', label: 'Tax' },
+              { id: 'payment', label: 'Payment Settings' },
               { id: 'checkout', label: 'Checkout' },
               { id: 'notifications', label: 'Notifications' },
               { id: 'security', label: 'Security' },
@@ -318,8 +339,14 @@ export default function SettingsPage() {
           {/* Tax Tab */}
           {activeTab === 'tax' && (
             <div className="p-6 space-y-4">
+              {(!formData.defaultTaxRate || !formData.businessState) && (
+                <div className="bg-amber-50 border border-amber-300 rounded p-4 text-sm text-amber-900">
+                  {!formData.defaultTaxRate && <p>GST rate is not configured - orders will not charge tax until a rate is set.</p>}
+                  {!formData.businessState && <p>Business state is not configured - orders cannot be split into CGST+SGST vs IGST until this is set. Tax will still be charged as a single total.</p>}
+                </div>
+              )}
               <div>
-                <label className="block text-sm font-medium text-black mb-2">Default Tax Rate (%)</label>
+                <label className="block text-sm font-medium text-black mb-2">Default GST Rate (%)</label>
                 <input
                   type="number"
                   step="0.1"
@@ -346,6 +373,142 @@ export default function SettingsPage() {
                     : 'Tax is already included in the displayed price'}
                 </p>
               </div>
+              <div className="border-t border-gray-light pt-4">
+                <label className="block text-sm font-medium text-black mb-2">Business State (for GST split)</label>
+                <select
+                  value={formData.businessState || ''}
+                  onChange={(e) => handleInputChange('businessState', e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black bg-white"
+                >
+                  <option value="">Not set</option>
+                  {INDIAN_STATES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-medium mt-2">
+                  Orders shipping within this state charge CGST+SGST; orders shipping elsewhere charge IGST.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-black mb-2">GSTIN</label>
+                <input
+                  type="text"
+                  value={formData.gstin || ''}
+                  onChange={(e) => handleInputChange('gstin', e.target.value.toUpperCase())}
+                  placeholder="15-character GSTIN"
+                  maxLength={15}
+                  className="w-full px-4 py-2 border border-gray-light rounded focus:outline-none focus:border-black uppercase"
+                />
+                <p className="text-xs text-gray-medium mt-2">Enter your business's real GSTIN - this is never generated automatically.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Payment Settings Tab */}
+          {activeTab === 'payment' && (
+            <div className="p-6 space-y-6">
+              <div className="bg-blue-50 border border-blue-200 rounded p-4 text-sm text-blue-900">
+                Control which payment methods customers can use at checkout. Changes here are enforced
+                on the server - disabling a method blocks it immediately, even for direct API requests.
+              </div>
+
+              {/* Razorpay */}
+              <div className="border border-gray-light rounded p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-medium text-black">Razorpay</p>
+                    <p className="text-xs text-gray-medium">Online payments - cards, UPI, net banking, wallets</p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.razorpayEnabled || false}
+                      onChange={(e) => handleTogglePaymentMethod('razorpayEnabled', e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm text-black">{formData.razorpayEnabled ? 'Enabled' : 'Disabled'}</span>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <span
+                    className={`text-xs px-2 py-1 rounded ${
+                      providerStatus?.razorpay.configured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}
+                  >
+                    API keys: {providerStatus ? (providerStatus.razorpay.configured ? 'Configured' : 'Not Configured') : 'Checking...'}
+                  </span>
+                  <span
+                    className={`text-xs px-2 py-1 rounded ${
+                      providerStatus?.razorpay.webhookConfigured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    Webhook secret: {providerStatus ? (providerStatus.razorpay.webhookConfigured ? 'Configured' : 'Not Configured') : 'Checking...'}
+                  </span>
+                </div>
+
+                {providerStatus && formData.razorpayEnabled && !providerStatus.razorpay.configured && (
+                  <div className="bg-red-50 border border-red-200 rounded p-3 mt-3 text-xs text-red-700">
+                    Razorpay is enabled here but RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are not set in the
+                    server environment - customers will see this option fail at checkout until those are configured.
+                  </div>
+                )}
+                {providerStatus && formData.razorpayEnabled && providerStatus.razorpay.configured && !providerStatus.razorpay.webhookConfigured && (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 mt-3 text-xs text-amber-900">
+                    RAZORPAY_WEBHOOK_SECRET is not set - payment confirmations will only be processed via the
+                    customer&apos;s browser callback, not the more reliable asynchronous webhook. Configure this
+                    for production use.
+                  </div>
+                )}
+
+                <div className="mt-4 pt-4 border-t border-gray-light">
+                  <p className="text-xs font-medium text-black mb-2">Methods available through Razorpay Checkout</p>
+                  <p className="text-xs text-gray-medium mb-2">
+                    Card, UPI, Net Banking, and Wallets are offered automatically by Razorpay&apos;s own Checkout
+                    widget once Razorpay is enabled above. These are not independently toggleable from this
+                    website - which specific methods appear is controlled by your Razorpay account&apos;s own
+                    configuration and payment method settings in the Razorpay Dashboard, not by this admin panel.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {['Card', 'UPI', 'Net Banking', 'Wallets'].map((m) => (
+                      <span key={m} className="text-xs px-2 py-1 bg-gray-light text-gray-dark rounded">{m}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Cash on Delivery */}
+              <div className="border border-gray-light rounded p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-black">Cash on Delivery (COD)</p>
+                    <p className="text-xs text-gray-medium">No online payment gateway required - collected at delivery</p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.codEnabled !== false}
+                      onChange={(e) => handleTogglePaymentMethod('codEnabled', e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm text-black">{formData.codEnabled !== false ? 'Enabled' : 'Disabled'}</span>
+                  </label>
+                </div>
+              </div>
+
+              {providerStatus && !providerStatus.razorpay.enabled && providerStatus.cod.enabled === false && (
+                <div className="bg-red-50 border border-red-300 rounded p-4 text-sm text-red-800">
+                  No payment method is currently enabled. Customers will not be able to complete checkout
+                  until at least one of Razorpay or Cash on Delivery is turned on.
+                </div>
+              )}
+
+              {settings?.lastModifiedAt && (
+                <p className="text-xs text-gray-medium border-t border-gray-light pt-4">
+                  Last updated {new Date(settings.lastModifiedAt).toLocaleString('en-IN')}
+                  {settings.lastModifiedBy ? ` by admin ${settings.lastModifiedBy}` : ''}
+                </p>
+              )}
             </div>
           )}
 
@@ -469,25 +632,10 @@ export default function SettingsPage() {
           {/* Security Tab */}
           {activeTab === 'security' && (
             <div className="p-6 space-y-4">
-              <h3 className="text-sm font-medium text-black">Payment Providers</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 border border-gray-light rounded">
-                  <div>
-                    <p className="text-sm font-medium text-black">Stripe</p>
-                    <p className="text-xs text-gray-medium">Credit card payments</p>
-                  </div>
-                  <span className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded">Not Configured</span>
-                </div>
-                <div className="flex items-center justify-between p-3 border border-gray-light rounded">
-                  <div>
-                    <p className="text-sm font-medium text-black">Razorpay</p>
-                    <p className="text-xs text-gray-medium">Multiple payment methods (India)</p>
-                  </div>
-                  <span className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded">Not Configured</span>
-                </div>
-              </div>
-              <div className="bg-blue-50 border border-blue-200 rounded p-4 mt-4 text-sm text-blue-900">
-                <strong>Note:</strong> Payment provider keys and secrets are configured via environment variables for security. Do not store them in database settings.
+              <div className="bg-blue-50 border border-blue-200 rounded p-4 text-sm text-blue-900">
+                Payment provider enable/disable controls have moved to the <strong>Payment Settings</strong> tab.
+                Provider API keys and secrets are configured via server environment variables, never stored
+                in these database settings.
               </div>
 
               <div className="border-t border-gray-light pt-6 mt-6">

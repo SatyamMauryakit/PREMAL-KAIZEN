@@ -44,19 +44,6 @@ export default function InventoryPage() {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'in_stock':
-        return 'text-green-600';
-      case 'low_stock':
-        return 'text-yellow-600';
-      case 'out_of_stock':
-        return 'text-red-600';
-      default:
-        return 'text-gray-600';
-    }
-  };
-
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'in_stock':

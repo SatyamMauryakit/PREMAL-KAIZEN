@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';

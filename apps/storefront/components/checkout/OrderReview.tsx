@@ -2,21 +2,31 @@
 
 import { useCart } from '@/lib/cart-context';
 import { useCheckout } from '@/lib/checkout-context';
+import { useAuth } from '@/lib/auth-context';
 import { formatPrice } from '@/lib/pricing';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getCheckoutSettings, calculateTax, calculateShipping, CheckoutSettings } from '@/lib/checkout-settings';
+import { openRazorpayCheckout } from '@/lib/razorpay-checkout';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
 export default function OrderReview() {
-  const { items, clearCart } = useCart();
+  const { items } = useCart();
   const { goToStep, shippingAddress, paymentMethod, shippingMethod, appliedCoupon, setError } = useCheckout();
+  const { user } = useAuth();
   const [isPlacing, setIsPlacing] = useState(false);
+  const [settings, setSettings] = useState<CheckoutSettings | null>(null);
+
+  useEffect(() => {
+    getCheckoutSettings().then(setSettings).catch(() => setSettings(null));
+  }, []);
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const discount = appliedCoupon?.discountAmount || 0;
   const taxable = Math.max(0, subtotal - discount);
-  const shipping = subtotal > 10000 ? 0 : 100;
-  const tax = Math.round(taxable * 0.18);
+  const selectedMethod = settings?.shippingMethods.find((m) => m.id === shippingMethod);
+  const shipping = settings ? calculateShipping(subtotal, selectedMethod) : 0;
+  const tax = settings ? calculateTax(taxable, settings) : 0;
   const total = taxable + tax + shipping;
 
   const handlePlaceOrder = async () => {
@@ -26,6 +36,9 @@ export default function OrderReview() {
       const token = localStorage.getItem('sessionToken');
       if (!token) {
         throw new Error('Please log in to place an order.');
+      }
+      if (!shippingAddress) {
+        throw new Error('Please add a shipping address.');
       }
 
       const response = await fetch(`${API_BASE}/api/orders`, {
@@ -44,6 +57,7 @@ export default function OrderReview() {
           couponCode: appliedCoupon?.code,
           paymentMethod,
           shippingMethod,
+          shippingAddress,
         }),
       });
 
@@ -52,7 +66,58 @@ export default function OrderReview() {
         throw new Error(order.message || 'Failed to place order');
       }
 
-      clearCart();
+      // COD: the order is already placed and confirmed - no payment step needed.
+      // The cart is cleared on the confirmation page itself, not here - clearing it
+      // on this page raced against checkout's own "redirect to /cart when empty"
+      // effect and could bounce the customer to an empty cart instead.
+      if (!order.razorpay) {
+        window.location.href = `/order-confirmation/${order.id}`;
+        return;
+      }
+
+      // Online payment: open Razorpay Checkout for the order the server just created.
+      // A successful callback here is NOT proof of payment on its own - it is only
+      // sent to the server's /verify endpoint, which independently confirms the
+      // signature and the payment's real amount/status with Razorpay before the
+      // order is ever marked paid.
+      let paymentResult;
+      try {
+        paymentResult = await openRazorpayCheckout({
+          keyId: order.razorpay.keyId,
+          razorpayOrderId: order.razorpay.orderId,
+          amount: order.razorpay.amount,
+          currency: order.razorpay.currency,
+          orderNumber: order.orderNumber,
+          customerName: `${shippingAddress.firstName} ${shippingAddress.lastName}`,
+          customerEmail: user?.email,
+          customerPhone: shippingAddress.phoneNumber,
+        });
+      } catch (checkoutErr) {
+        // Payment was cancelled or failed client-side. The order remains pending/
+        // unpaid in the database (not deleted) - it is not marked paid here, and
+        // no confirmation email has been sent.
+        throw new Error(checkoutErr instanceof Error ? checkoutErr.message : 'Payment was not completed.');
+      }
+
+      const verifyResponse = await fetch(`${API_BASE}/api/payments/razorpay/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          orderId: order.id,
+          razorpay_order_id: paymentResult.razorpay_order_id,
+          razorpay_payment_id: paymentResult.razorpay_payment_id,
+          razorpay_signature: paymentResult.razorpay_signature,
+        }),
+      });
+
+      const verifyResult = await verifyResponse.json();
+      if (!verifyResponse.ok) {
+        throw new Error(verifyResult.message || 'Payment could not be verified. Please contact support with your order number.');
+      }
+
       window.location.href = `/order-confirmation/${order.id}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Order failed');
@@ -73,6 +138,7 @@ export default function OrderReview() {
               <p>{shippingAddress.firstName} {shippingAddress.lastName}</p>
               <p>{shippingAddress.street1}</p>
               {shippingAddress.street2 && <p>{shippingAddress.street2}</p>}
+              {shippingAddress.landmark && <p>Near {shippingAddress.landmark}</p>}
               <p>{shippingAddress.city}, {shippingAddress.state} {shippingAddress.postalCode}</p>
               <p>{shippingAddress.phoneNumber}</p>
             </div>
@@ -84,7 +150,11 @@ export default function OrderReview() {
         <div className="bg-white rounded-lg p-6">
           <h3 className="font-bold text-black mb-4">Payment Method</h3>
           <p className="text-sm text-gray-700 capitalize mb-4">{paymentMethod || 'Not selected'}</p>
-          <p className="text-xs text-gray-600 mb-4">Your payment will be securely processed.</p>
+          <p className="text-xs text-gray-600 mb-4">
+            {paymentMethod === 'cod'
+              ? 'Pay in cash or by UPI when your order is delivered.'
+              : 'Your payment will be processed by our payment partner at checkout.'}
+          </p>
           <button onClick={() => goToStep('payment')} className="text-black font-medium hover:underline text-sm">Edit</button>
         </div>
       </div>
@@ -108,8 +178,8 @@ export default function OrderReview() {
               <span>Voucher ({appliedCoupon?.code})</span><span>-{formatPrice(discount)}</span>
             </div>
           )}
-          <div className="flex justify-between text-gray-700"><span>Shipping</span><span>{shipping === 0 ? 'FREE' : formatPrice(shipping)}</span></div>
-          <div className="flex justify-between text-gray-700"><span>Tax (18%)</span><span>{formatPrice(tax)}</span></div>
+          <div className="flex justify-between text-gray-700"><span>Shipping{selectedMethod ? ` (${selectedMethod.name})` : ''}</span><span>{shipping === 0 ? 'FREE' : formatPrice(shipping)}</span></div>
+          <div className="flex justify-between text-gray-700"><span>{settings && settings.taxRate > 0 ? `GST (${settings.taxRate}%)` : 'GST'}</span><span>{formatPrice(tax)}</span></div>
           <div className="flex justify-between pt-2 border-t font-bold text-black"><span>Total</span><span>{formatPrice(total)}</span></div>
         </div>
       </div>

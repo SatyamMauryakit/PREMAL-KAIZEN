@@ -1,15 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-
-export interface ContactMessage {
-  id: string;
-  name: string;
-  email: string;
-  subject: string;
-  category: string;
-  orderNumber?: string;
-  message: string;
-  createdAt: Date;
-}
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface ContactSubmission {
   name: string;
@@ -22,55 +12,56 @@ export interface ContactSubmission {
 
 @Injectable()
 export class ContactService {
-  // In-memory storage for demo (replace with database in production)
-  private messages: ContactMessage[] = [];
+  // Rate-limit tracking only - ephemeral by nature, doesn't need to survive a restart.
   private submissionLog: Map<string, number[]> = new Map();
 
-  async submitContactForm(submission: ContactSubmission): Promise<{ id: string; message: string }> {
-    // Validate input
-    this.validateSubmission(submission);
+  constructor(private prisma: PrismaService) {}
 
-    // Check for rate limiting (max 5 submissions per email per hour)
+  async submitContactForm(submission: ContactSubmission): Promise<{ id: string; message: string }> {
+    this.validateSubmission(submission);
     this.checkRateLimit(submission.email);
 
-    // Create message record
-    const message: ContactMessage = {
-      id: `contact-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: submission.name.trim(),
-      email: submission.email.toLowerCase(),
-      subject: submission.subject.trim(),
-      category: submission.category,
-      orderNumber: submission.orderNumber?.trim(),
-      message: submission.message.trim(),
-      createdAt: new Date(),
-    };
+    const created = await this.prisma.contactMessage.create({
+      data: {
+        name: submission.name.trim(),
+        email: submission.email.toLowerCase(),
+        subject: submission.subject.trim(),
+        category: submission.category,
+        orderNumber: submission.orderNumber?.trim() || null,
+        message: submission.message.trim(),
+      },
+    });
 
-    // Store message
-    this.messages.push(message);
-
-    // Log submission for rate limiting
     this.logSubmission(submission.email);
 
-    // In production, send confirmation email here
-    // For now, we just return success
+    // No email-sending integration is configured, so no confirmation email is sent here.
 
     return {
-      id: message.id,
+      id: created.id,
       message: 'Thank you for contacting us. We will get back to you soon.',
     };
   }
 
-  // Get all messages (admin only)
-  async getAllMessages(limit = 50, offset = 0): Promise<{ messages: ContactMessage[]; total: number }> {
-    return {
-      messages: this.messages.slice(offset, offset + limit),
-      total: this.messages.length,
-    };
+  // Get all messages (admin only - enforced at the controller via guards)
+  async getAllMessages(limit = 50, offset = 0) {
+    const [messages, total] = await Promise.all([
+      this.prisma.contactMessage.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.contactMessage.count(),
+    ]);
+
+    return { messages, total };
   }
 
-  // Get messages by email
-  async getMessagesByEmail(email: string): Promise<ContactMessage[]> {
-    return this.messages.filter((m) => m.email === email.toLowerCase());
+  // Get messages by email (admin only - enforced at the controller via guards)
+  async getMessagesByEmail(email: string) {
+    return this.prisma.contactMessage.findMany({
+      where: { email: email.toLowerCase() },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   // Private validation and utility methods

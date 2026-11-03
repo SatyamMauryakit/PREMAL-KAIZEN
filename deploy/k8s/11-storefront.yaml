@@ -1,0 +1,77 @@
+# @premal/storefront (Next.js 15, standalone output). Stateless - no volumes, no env
+# vars needed at runtime (NEXT_PUBLIC_API_URL is baked into the client JS bundle at
+# `docker build` time via --build-arg, not read at container start).
+#
+# replicas: 1 - this is a single-node cluster; a second replica adds no real
+# availability (both would go down with the one EC2 instance/node together) and the
+# task explicitly asks not to add HA replicas that don't actually buy HA here.
+#
+# No dedicated health route on this app (confirmed - only the API has one), so probes
+# hit "/" and accept a 200, matching the same check already used in this image's own
+# Dockerfile HEALTHCHECK instruction.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premal-storefront
+  namespace: premal-kaizen
+  labels:
+    app: premal-storefront
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: premal-storefront
+  template:
+    metadata:
+      labels:
+        app: premal-storefront
+    spec:
+      # Explicit, matching the fixed UID/GID pinned in apps/storefront/Dockerfile's
+      # `useradd --uid/--gid` (see apps/api/Dockerfile's comment for the full rationale).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: storefront
+          image: premal-storefront:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-storefront
+  namespace: premal-kaizen
+spec:
+  type: NodePort
+  selector:
+    app: premal-storefront
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30000

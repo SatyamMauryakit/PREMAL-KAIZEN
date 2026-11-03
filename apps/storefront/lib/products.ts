@@ -8,8 +8,6 @@ export interface Product {
   originalPrice?: number;
   colors: string[];
   sizes: string[];
-  rating: number;
-  reviewCount: number;
   image: string;
   description: string;
   isNew?: boolean;
@@ -46,8 +44,6 @@ function toProduct(p: ApiProduct): Product {
     originalPrice: p.originalPrice ? Math.round(p.originalPrice / 100) : undefined,
     colors: (p.colors || []).map((c) => c.toLowerCase()),
     sizes: p.sizes || [],
-    rating: 4.5,
-    reviewCount: 0,
     image: p.images?.[0]?.url || PLACEHOLDER_IMAGE,
     description: p.description,
     isNew: Date.now() - createdAt.getTime() < NEW_ARRIVAL_WINDOW_MS,
@@ -83,21 +79,51 @@ export function derivePriceRange(products: Product[]): { min: number; max: numbe
   return { min: Math.min(...prices), max: Math.max(...prices) };
 }
 
-// Standard size run and color palette used as filter options across the catalog.
-export const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
+/** Derive the size filter options from whatever products are actually in the catalog. */
+export function deriveSizes(products: Product[]): string[] {
+  const seen = new Set<string>();
+  for (const p of products) {
+    for (const s of p.sizes) seen.add(s);
+  }
+  return Array.from(seen);
+}
 
-export const COLORS = [
-  { id: 'black', label: 'Black', hex: '#000000' },
-  { id: 'charcoal', label: 'Charcoal', hex: '#36454F' },
-  { id: 'beige', label: 'Beige', hex: '#D4C5B9' },
-  { id: 'cream', label: 'Cream', hex: '#F5F1ED' },
-  { id: 'gray', label: 'Gray', hex: '#666666' },
-  { id: 'sand', label: 'Sand', hex: '#C2B280' },
-  { id: 'olive', label: 'Olive', hex: '#556B2F' },
-  { id: 'khaki', label: 'Khaki', hex: '#C3B091' },
-  { id: 'navy', label: 'Navy', hex: '#000080' },
-  { id: 'white', label: 'White', hex: '#FFFFFF' },
-];
+// Swatch color for known color names - falls back to a neutral gray for any
+// catalog color name not in this list, rather than refusing to show it.
+const COLOR_HEX: Record<string, string> = {
+  black: '#000000',
+  charcoal: '#36454F',
+  beige: '#D4C5B9',
+  cream: '#F5F1ED',
+  gray: '#666666',
+  grey: '#666666',
+  sand: '#C2B280',
+  olive: '#556B2F',
+  khaki: '#C3B091',
+  navy: '#000080',
+  white: '#FFFFFF',
+  brown: '#8B4513',
+  red: '#B22222',
+  blue: '#1E3A8A',
+  green: '#2F6B3C',
+};
+
+/** Derive the color filter options (with swatches) from whatever products are actually in the catalog. */
+export function deriveColors(products: Product[]): Array<{ id: string; label: string; hex: string }> {
+  const seen = new Map<string, string>();
+  for (const p of products) {
+    for (const c of p.colors) {
+      if (!seen.has(c)) {
+        seen.set(c, COLOR_HEX[c.toLowerCase()] || '#999999');
+      }
+    }
+  }
+  return Array.from(seen.entries()).map(([id, hex]) => ({
+    id,
+    label: id.charAt(0).toUpperCase() + id.slice(1),
+    hex,
+  }));
+}
 
 // Filter product list based on criteria
 export function filterProducts(
@@ -160,7 +186,7 @@ export function filterProducts(
 // Sort products
 export function sortProducts(
   products: Product[],
-  sortBy: 'featured' | 'price-low' | 'price-high' | 'newest' | 'rating'
+  sortBy: 'featured' | 'price-low' | 'price-high' | 'newest'
 ): Product[] {
   const sorted = [...products];
 
@@ -171,15 +197,13 @@ export function sortProducts(
       return sorted.sort((a, b) => b.price - a.price);
     case 'newest':
       return sorted.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-    case 'rating':
-      return sorted.sort((a, b) => b.rating - a.rating);
     case 'featured':
     default:
-      // Featured: new items first, then by rating
+      // Featured: new items first, then newest
       return sorted.sort((a, b) => {
         if (a.isNew && !b.isNew) return -1;
         if (!a.isNew && b.isNew) return 1;
-        return b.rating - a.rating;
+        return b.createdAt.getTime() - a.createdAt.getTime();
       });
   }
 }

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 
 export default function ProfilePage() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, updateProfile } = useAuth();
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -19,7 +19,7 @@ export default function ProfilePage() {
       setFormData({
         firstName: user.firstName || '',
         lastName: user.lastName || '',
-        phoneNumber: '',
+        phoneNumber: user.phoneNumber || '',
       });
     }
   }, [user]);
@@ -38,8 +38,7 @@ export default function ProfilePage() {
     setIsSaving(true);
 
     try {
-      // TODO: Call API to update profile
-      console.log('Update profile:', formData);
+      await updateProfile(formData);
       setSuccess('Profile updated successfully');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed');

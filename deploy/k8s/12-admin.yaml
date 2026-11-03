@@ -1,0 +1,73 @@
+# @premal/admin (Next.js 15, standalone output). Same rationale as the storefront
+# manifest (stateless, replicas: 1, no dedicated health route).
+#
+# Root "/" redirects unauthenticated requests (307, confirmed via this image's own
+# Dockerfile HEALTHCHECK which explicitly accepts 200 or 307). Kubernetes' httpGet
+# probe treats any 200-399 response as success by default, so 307 already passes
+# without any extra configuration here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premal-admin
+  namespace: premal-kaizen
+  labels:
+    app: premal-admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: premal-admin
+  template:
+    metadata:
+      labels:
+        app: premal-admin
+    spec:
+      # Explicit, matching the fixed UID/GID pinned in apps/admin/Dockerfile's
+      # `useradd --uid/--gid` (see apps/api/Dockerfile's comment for the full rationale).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: admin
+          image: premal-admin:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3001
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "192Mi"
+            limits:
+              cpu: "400m"
+              memory: "384Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-admin
+  namespace: premal-kaizen
+spec:
+  type: NodePort
+  selector:
+    app: premal-admin
+  ports:
+    - port: 3001
+      targetPort: 3001
+      nodePort: 30001

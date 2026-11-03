@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Suspense, useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Product,
   fetchProducts,
   deriveCategories,
+  deriveSizes,
+  deriveColors,
   derivePriceRange,
   filterProducts,
   sortProducts,
@@ -13,9 +16,18 @@ import { FilterSidebar } from '@/components/FilterSidebar';
 import { ProductGrid } from '@/components/ProductGrid';
 import { SortDropdown } from '@/components/SortDropdown';
 
-type SortOption = 'featured' | 'price-low' | 'price-high' | 'newest' | 'rating';
+type SortOption = 'featured' | 'price-low' | 'price-high' | 'newest';
 
 export default function ShopPage() {
+  return (
+    <Suspense fallback={null}>
+      <ShopPageContent />
+    </Suspense>
+  );
+}
+
+function ShopPageContent() {
+  const searchParams = useSearchParams();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -25,11 +37,15 @@ export default function ShopPage() {
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const [priceMin, setPriceMin] = useState(0);
   const [priceMax, setPriceMax] = useState(0);
-  const [sortBy, setSortBy] = useState<SortOption>('featured');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>(
+    searchParams.get('filter') === 'new' ? 'newest' : 'featured'
+  );
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [showFiltersDrawer, setShowFiltersDrawer] = useState(false);
 
   const categories = useMemo(() => deriveCategories(allProducts), [allProducts]);
+  const sizeOptions = useMemo(() => deriveSizes(allProducts), [allProducts]);
+  const colorOptions = useMemo(() => deriveColors(allProducts), [allProducts]);
   const priceRange = useMemo(() => derivePriceRange(allProducts), [allProducts]);
 
   // Load the live catalog once on mount.
@@ -128,6 +144,8 @@ export default function ShopPage() {
             priceMin={priceMin}
             priceMax={priceMax}
             categories={categories}
+            sizes={sizeOptions}
+            colors={colorOptions}
             priceRange={priceRange}
             onCategoriesChange={setSelectedCategories}
             onSizesChange={setSelectedSizes}
@@ -162,6 +180,26 @@ export default function ShopPage() {
                 </span>
               )}
             </button>
+
+            {/* Search */}
+            <div className="relative md:w-72">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search products..."
+                className="w-full px-4 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-black"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black"
+                >
+                  ×
+                </button>
+              )}
+            </div>
 
             {/* Sort Dropdown */}
             <div className="md:ml-auto">
@@ -200,6 +238,8 @@ export default function ShopPage() {
           priceMin={priceMin}
           priceMax={priceMax}
           categories={categories}
+          sizes={sizeOptions}
+          colors={colorOptions}
           priceRange={priceRange}
           onCategoriesChange={setSelectedCategories}
           onSizesChange={setSelectedSizes}

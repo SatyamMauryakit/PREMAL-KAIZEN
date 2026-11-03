@@ -75,28 +75,14 @@ export default function TrackOrderPage() {
     setTimeline([]);
 
     try {
-      // For guest tracking, we validate the verification code is the email associated with the order
-      // In a real system, this would check against the backend
-      const mockToken = 'guest-token';
-      const response = await orderService.getOrders(mockToken);
-      const foundOrder = response.orders?.find(
-        (o: Order) => o.orderNumber.toLowerCase() === orderNumber.toLowerCase()
-      );
-
-      if (!foundOrder) {
-        setError('Order not found. Please verify your order number.');
-        return;
-      }
-
-      // Mock verification - in production, verify email matches the order
       if (!verificationCode.includes('@')) {
         setError('Please enter a valid email address to verify your order.');
         return;
       }
 
+      const foundOrder = await orderService.trackGuestOrder(orderNumber.trim(), verificationCode.trim());
       setOrder(foundOrder);
-      const orderTimeline = await orderService.getOrderTimeline(foundOrder.id, mockToken);
-      setTimeline(orderTimeline);
+      setTimeline(orderService.timelineForOrder(foundOrder));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load order');
     } finally {
@@ -281,7 +267,7 @@ export default function TrackOrderPage() {
                     Order Date
                   </p>
                   <p className="text-lg font-bold text-black">
-                    {new Date(order.createdAt).toLocaleDateString()}
+                    {new Date(order.createdAt).toLocaleDateString('en-IN')}
                   </p>
                 </div>
                 <div>
@@ -380,7 +366,7 @@ export default function TrackOrderPage() {
                         Estimated Delivery
                       </p>
                       <p className="text-lg text-black">
-                        {new Date(order.estimatedDelivery).toLocaleDateString()}
+                        {new Date(order.estimatedDelivery).toLocaleDateString('en-IN')}
                       </p>
                     </div>
                   )}

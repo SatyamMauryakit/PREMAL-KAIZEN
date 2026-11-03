@@ -14,6 +14,8 @@ export interface StoreSettings {
   storeEmail: string;
   storePhone: string;
   businessAddress: string;
+  businessState: string;
+  gstin: string;
   timezone: string;
   locale: string;
   currency: string;
@@ -30,10 +32,16 @@ export interface StoreSettings {
   lowStockNotificationsEnabled: boolean;
   stripeEnabled: boolean;
   razorpayEnabled: boolean;
+  codEnabled: boolean;
   emailNotificationsEnabled: boolean;
   smsNotificationsEnabled: boolean;
   lastModifiedAt: string;
   lastModifiedBy?: string;
+}
+
+export interface PaymentProviderStatus {
+  razorpay: { enabled: boolean; configured: boolean; webhookConfigured: boolean };
+  cod: { enabled: boolean };
 }
 
 export interface SettingsAuditLog {
@@ -199,6 +207,15 @@ class SettingsService {
     });
 
     if (!response.ok) throw new Error('Failed to calculate tax');
+    return response.json();
+  }
+
+  async getPaymentProviderStatus(token: string): Promise<PaymentProviderStatus> {
+    const response = await fetch(`${this.apiBase}/api/admin/settings/payment-providers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch payment provider status');
     return response.json();
   }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, BadRequestException, UseGuards } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -75,6 +75,15 @@ export class PromotionsController {
     });
   }
 
+  // KNOWN RISK (flagged, not fixed here): this endpoint is unauthenticated and trusts
+  // a client-supplied userId, because the real storefront checkout flow
+  // (checkout-context.tsx) calls it today without sending an Authorization header.
+  // Adding @UseGuards(AuthGuard) here would 401 every real coupon-apply attempt until
+  // the frontend is updated to send a session token too - that's a coordinated
+  // frontend+backend change outside this backend-only phase's scope. The blast radius
+  // is read-only, though: validateAndApplyCoupon only reads and returns a discount
+  // preview, it never redeems/mutates anything (see redeemCoupon/redeemCouponInTx
+  // below, which do mutate and are properly guarded).
   @Post('validate-coupon')
   async validateCoupon(@Body() body: any) {
     if (!body.couponCode || !body.userId || !body.cartItems || !body.subtotal) {
@@ -89,27 +98,37 @@ export class PromotionsController {
     );
   }
 
+  // Confirmed unused by any real client (grepped the storefront and admin apps) - the
+  // actual checkout flow redeems coupons server-side from inside OrdersService's own
+  // transaction, never through this HTTP route. It was previously unauthenticated
+  // despite writing a real CouponRedemption row and incrementing usage counters from a
+  // fully client-supplied userId/orderId - fixed to require login and use the caller's
+  // own session id, consistent with every other mutating endpoint in this API.
+  @UseGuards(AuthGuard)
   @Post(':id/redeem')
-  async redeemCoupon(@Param('id') promotionId: string, @Body() body: any) {
-    if (!body.couponCode || !body.userId || !body.orderId || body.discountAmount === undefined) {
-      throw new BadRequestException('couponCode, userId, orderId, and discountAmount are required');
+  async redeemCoupon(@Param('id') promotionId: string, @Body() body: any, @Req() req: any) {
+    if (!body.couponCode || !body.orderId || body.discountAmount === undefined) {
+      throw new BadRequestException('couponCode, orderId, and discountAmount are required');
     }
 
     return this.promotionsService.redeemCoupon(
       body.couponCode,
-      body.userId,
+      req.user.id,
       body.orderId,
       parseInt(body.discountAmount)
     );
   }
 
+  // Same fix as redeemCoupon above, for the same reason - also confirmed unused by any
+  // real client.
+  @UseGuards(AuthGuard)
   @Post(':id/release')
-  async releaseCoupon(@Param('id') promotionId: string, @Body() body: any) {
-    if (!body.couponCode || !body.userId || !body.orderId) {
-      throw new BadRequestException('couponCode, userId, and orderId are required');
+  async releaseCoupon(@Param('id') promotionId: string, @Body() body: any, @Req() req: any) {
+    if (!body.couponCode || !body.orderId) {
+      throw new BadRequestException('couponCode and orderId are required');
     }
 
-    await this.promotionsService.releaseRedemption(body.couponCode, body.userId, body.orderId);
+    await this.promotionsService.releaseRedemption(body.couponCode, req.user.id, body.orderId);
     return { success: true };
   }
 }

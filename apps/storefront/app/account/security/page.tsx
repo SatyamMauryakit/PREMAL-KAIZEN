@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 
 export default function SecurityPage() {
-  const { logout } = useAuth();
+  const { logout, changePassword } = useAuth();
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
@@ -46,8 +46,7 @@ export default function SecurityPage() {
     }
 
     try {
-      // TODO: Call API to change password
-      console.log('Change password:', passwordForm);
+      await changePassword(passwordForm.currentPassword, passwordForm.newPassword);
       setSuccess('Password changed successfully');
       setPasswordForm({
         currentPassword: '',
@@ -149,7 +148,7 @@ export default function SecurityPage() {
       <div className="bg-white rounded-lg shadow-md p-8">
         <h2 className="text-2xl font-bold text-black mb-6">Logout</h2>
         <p className="text-gray-600 mb-6">
-          Click the button below to logout from your account on all devices.
+          Click the button below to log out of your account on this device.
         </p>
         <button
           onClick={handleLogout}

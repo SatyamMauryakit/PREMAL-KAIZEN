@@ -8,6 +8,7 @@ export interface ShippingAddress {
   phoneNumber: string;
   street1: string;
   street2?: string;
+  landmark?: string;
   city: string;
   state: string;
   postalCode: string;
@@ -29,7 +30,7 @@ interface CheckoutContextType {
   shippingAddress: ShippingAddress | null;
   billingAddress: ShippingAddress | null;
   sameAsBilling: boolean;
-  shippingMethod: 'standard' | 'express' | 'overnight' | null;
+  shippingMethod: string | null;
   paymentMethod: 'card' | 'upi' | 'netbanking' | 'cod' | null;
   orderNotes: string;
   isLoading: boolean;
@@ -45,7 +46,7 @@ interface CheckoutContextType {
   updateShippingAddress: (address: ShippingAddress) => void;
   updateBillingAddress: (address: ShippingAddress) => void;
   setSameAsBilling: (same: boolean) => void;
-  setShippingMethod: (method: 'standard' | 'express' | 'overnight') => void;
+  setShippingMethod: (method: string) => void;
   setPaymentMethod: (method: 'card' | 'upi' | 'netbanking' | 'cod') => void;
   setOrderNotes: (notes: string) => void;
   setError: (error: string | null) => void;
@@ -54,24 +55,12 @@ interface CheckoutContextType {
 
 const CheckoutContext = createContext<CheckoutContextType | undefined>(undefined);
 
-const initialAddress: ShippingAddress = {
-  firstName: '',
-  lastName: '',
-  phoneNumber: '',
-  street1: '',
-  street2: '',
-  city: '',
-  state: '',
-  postalCode: '',
-  country: 'India',
-};
-
 export function CheckoutProvider({ children }: { children: ReactNode }) {
   const [currentStep, setCurrentStep] = useState<'cart' | 'information' | 'shipping' | 'payment' | 'review'>('cart');
   const [shippingAddress, setShippingAddress] = useState<ShippingAddress | null>(null);
   const [billingAddress, setBillingAddress] = useState<ShippingAddress | null>(null);
   const [sameAsBilling, setSameAsShippingBilling] = useState(true);
-  const [shippingMethod, setShippingMethodState] = useState<'standard' | 'express' | 'overnight' | null>('standard');
+  const [shippingMethod, setShippingMethodState] = useState<string | null>('standard');
   const [paymentMethod, setPaymentMethodState] = useState<'card' | 'upi' | 'netbanking' | 'cod' | null>(null);
   const [orderNotes, setOrderNotesState] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -100,7 +89,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const setShippingMethod = (method: 'standard' | 'express' | 'overnight') => {
+  const setShippingMethod = (method: string) => {
     setShippingMethodState(method);
   };
 

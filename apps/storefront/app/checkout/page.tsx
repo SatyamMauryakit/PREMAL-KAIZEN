@@ -2,7 +2,6 @@
 
 import { useCart } from '@/lib/cart-context';
 import { useCheckout } from '@/lib/checkout-context';
-import { useAuth } from '@/lib/auth-context';
 import Link from 'next/link';
 import { useEffect } from 'react';
 import CheckoutProgress from '@/components/checkout/CheckoutProgress';
@@ -14,8 +13,7 @@ import OrderReview from '@/components/checkout/OrderReview';
 
 export default function CheckoutPage() {
   const { items, isHydrated } = useCart();
-  const { currentStep, goToStep, error, isLoading } = useCheckout();
-  const { user } = useAuth();
+  const { currentStep, error, isLoading } = useCheckout();
 
   useEffect(() => {
     // Wait for the cart to finish restoring from localStorage before deciding

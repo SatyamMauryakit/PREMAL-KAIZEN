@@ -2,56 +2,31 @@ import { Injectable } from '@nestjs/common';
 
 /**
  * WishlistService
- * Manages user wishlists and saved items.
- * This service owns:
- * - Wishlist items per user
- * - Wishlist metadata (created date, etc.)
- *
- * Note: Currently uses client-side localStorage.
- * Phase 6+ will migrate to server-backed wishlist with database persistence.
+ * Unfinished, unreachable stub - no WishlistController exists, so none of these
+ * methods are ever called. The real wishlist is entirely client-side (storefront's
+ * lib/wishlist-context.tsx, backed by localStorage), already implemented and working.
+ * Left in place rather than deleted since removing it is a bigger decision than this
+ * cleanup pass should make unilaterally; params are prefixed with `_` purely to
+ * silence unused-arg lint warnings without changing this stub's (non-)behavior.
  */
 @Injectable()
 export class WishlistService {
-  /**
-   * Get a user's wishlist
-   * @param userId - User ID or session ID
-   * @returns Wishlist items
-   */
-  async getWishlist(userId: string) {
-    // TODO: Fetch from database in Phase 6+
+  async getWishlist(_userId: string) {
     return {
       items: [],
       total: 0,
     };
   }
 
-  /**
-   * Add item to wishlist
-   * @param userId - User ID
-   * @param item - Item to add
-   */
-  async addItem(userId: string, item: any) {
-    // TODO: Implement wishlist item addition
+  async addItem(_userId: string, _item: unknown) {
     return null;
   }
 
-  /**
-   * Remove item from wishlist
-   * @param userId - User ID
-   * @param productId - Product ID
-   */
-  async removeItem(userId: string, productId: string) {
-    // TODO: Implement wishlist item removal
+  async removeItem(_userId: string, _productId: string) {
     return null;
   }
 
-  /**
-   * Check if item is in wishlist
-   * @param userId - User ID
-   * @param productId - Product ID
-   */
-  async isInWishlist(userId: string, productId: string) {
-    // TODO: Implement check
+  async isInWishlist(_userId: string, _productId: string) {
     return false;
   }
 }

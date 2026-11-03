@@ -6,7 +6,6 @@ import { useState, useEffect } from 'react';
 import { adminOrdersService, Order } from '@/lib/orders-service';
 
 const STATUS_OPTIONS = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
-const PAYMENT_STATUS_OPTIONS = ['pending', 'completed', 'failed', 'refunded'];
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -151,7 +150,7 @@ export default function OrdersPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-medium">
-                        {new Date(order.createdAt).toLocaleDateString()}
+                        {new Date(order.createdAt).toLocaleDateString('en-IN')}
                       </td>
                       <td className="px-6 py-4 text-sm space-x-2">
                         <Link href={`/admin/orders/${order.id}`} className="text-black hover:text-gray-dark font-medium">

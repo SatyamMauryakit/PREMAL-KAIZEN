@@ -1,13 +1,12 @@
 'use client';
 
 import { useCart } from '@/lib/cart-context';
-import { formatPrice, getPricingSummary, formatPricingSummary } from '@/lib/pricing';
+import { formatPrice } from '@/lib/pricing';
 import Link from 'next/link';
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity } = useCart();
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const pricing = formatPricingSummary(getPricingSummary(subtotal));
 
   if (items.length === 0) {
     return (
@@ -168,22 +167,22 @@ export default function CartPage() {
             <div className="space-y-3 mb-6 text-sm">
               <div className="flex justify-between text-gray-dark">
                 <span>Subtotal</span>
-                <span>{pricing.subtotal}</span>
+                <span>{formatPrice(subtotal)}</span>
               </div>
               <div className="flex justify-between text-gray-dark">
                 <span>Shipping</span>
-                <span>{pricing.shipping}</span>
+                <span className="text-gray-medium">Calculated at checkout</span>
               </div>
               <div className="flex justify-between text-gray-dark">
                 <span>Tax</span>
-                <span>{pricing.tax}</span>
+                <span className="text-gray-medium">Calculated at checkout</span>
               </div>
             </div>
 
             {/* Total */}
             <div className="flex justify-between text-base font-bold text-black pt-6 border-t border-gray-light mb-6">
-              <span>TOTAL</span>
-              <span>{pricing.total}</span>
+              <span>TOTAL (excl. shipping)</span>
+              <span>{formatPrice(subtotal)}</span>
             </div>
 
             {/* Checkout Button */}

@@ -25,8 +25,10 @@ export interface Address {
   label: string;
   firstName: string;
   lastName: string;
+  phoneNumber: string;
   street1: string;
   street2?: string;
+  landmark?: string;
   city: string;
   state: string;
   postalCode: string;

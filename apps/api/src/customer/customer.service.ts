@@ -1,5 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcrypt';
+
+const BCRYPT_ROUNDS = 10;
 
 /**
  * CustomerService
@@ -96,14 +99,31 @@ export class CustomerService {
       throw new NotFoundException('User not found');
     }
 
+    if (!currentPassword) {
+      throw new BadRequestException('Current password is required');
+    }
+
+    // Support bcrypt hashes; fall back to legacy base64 hashes created before
+    // the bcrypt migration (mirrors the same check used at login).
+    const looksLikeBcryptHash = /^\$2[aby]\$/.test(user.password);
+    const isCurrentPasswordValid = looksLikeBcryptHash
+      ? await bcrypt.compare(currentPassword, user.password)
+      : Buffer.from(currentPassword).toString('base64') === user.password;
+
+    if (!isCurrentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
     // Validate new password
     if (newPassword.length < 8) {
       throw new BadRequestException('Password must be at least 8 characters');
     }
 
+    const hashedPassword = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
     await this.prisma.user.update({
       where: { id: userId },
-      data: { password: newPassword },
+      data: { password: hashedPassword },
     });
 
     return { message: 'Password changed successfully' };
@@ -158,6 +178,7 @@ export class CustomerService {
       phoneNumber: string;
       street1: string;
       street2?: string;
+      landmark?: string;
       city: string;
       state: string;
       postalCode: string;
@@ -179,12 +200,13 @@ export class CustomerService {
     const address = await this.prisma.address.create({
       data: {
         userId,
-        label: data.label,
+        label: data.label || 'Home',
         firstName: data.firstName,
         lastName: data.lastName,
         phoneNumber: data.phoneNumber,
         street1: data.street1,
         street2: data.street2 || null,
+        landmark: data.landmark || null,
         city: data.city,
         state: data.state,
         postalCode: data.postalCode,
@@ -213,6 +235,7 @@ export class CustomerService {
       phoneNumber?: string;
       street1?: string;
       street2?: string;
+      landmark?: string;
       city?: string;
       state?: string;
       postalCode?: string;
@@ -239,12 +262,13 @@ export class CustomerService {
     const updated = await this.prisma.address.update({
       where: { id: addressId },
       data: {
-        label: data.label ?? address.label,
+        label: data.label || address.label,
         firstName: data.firstName ?? address.firstName,
         lastName: data.lastName ?? address.lastName,
         phoneNumber: data.phoneNumber ?? address.phoneNumber,
         street1: data.street1 ?? address.street1,
         street2: data.street2 !== undefined ? data.street2 : address.street2,
+        landmark: data.landmark !== undefined ? data.landmark : address.landmark,
         city: data.city ?? address.city,
         state: data.state ?? address.state,
         postalCode: data.postalCode ?? address.postalCode,
@@ -297,21 +321,32 @@ export class CustomerService {
   // ========================================================================
 
   private validateAddress(data: any) {
-    const required = ['label', 'firstName', 'lastName', 'phoneNumber', 'street1', 'city', 'state', 'postalCode', 'country'];
+    // "label" is presented to customers as an optional nickname (e.g. "Home, Office, etc.")
+    // on the storefront's address form, so it is not enforced here - see createAddress/updateAddress.
+    const required = ['firstName', 'lastName', 'phoneNumber', 'street1', 'city', 'state', 'postalCode', 'country'];
     for (const field of required) {
       if (!data[field]) {
         throw new BadRequestException(`${field} is required`);
       }
     }
 
-    // Validate Indian phone number (10 digits)
-    if (!/^\d{10}$/.test(data.phoneNumber.replace(/\D/g, ''))) {
-      throw new BadRequestException('Phone number must be 10 digits');
+    // Validate Indian mobile number: 10 digits, starting 6-9. A leading "0" (old STD-style
+    // dialing prefix) or an unambiguous "91"/"+91" country code is stripped first - but a bare
+    // 10-digit number that merely starts with "91" (e.g. 9123456780) is a valid number on its
+    // own and must not have those digits stripped.
+    let mobileDigits = data.phoneNumber.replace(/[\s-]/g, '').replace(/^0/, '');
+    if (mobileDigits.startsWith('+91')) {
+      mobileDigits = mobileDigits.slice(3);
+    } else if (mobileDigits.length === 12 && mobileDigits.startsWith('91')) {
+      mobileDigits = mobileDigits.slice(2);
+    }
+    if (!/^[6-9]\d{9}$/.test(mobileDigits)) {
+      throw new BadRequestException('Enter a valid 10-digit Indian mobile number');
     }
 
-    // Validate postal code (6 digits for India)
-    if (!/^\d{6}$/.test(data.postalCode.replace(/\D/g, ''))) {
-      throw new BadRequestException('Postal code must be 6 digits for India');
+    // Validate PIN code: 6 digits, first digit 1-9 (India has no PIN code starting with 0)
+    if (!/^[1-9]\d{5}$/.test(data.postalCode.trim())) {
+      throw new BadRequestException('Enter a valid 6-digit PIN code');
     }
   }
 }

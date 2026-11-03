@@ -4,7 +4,7 @@ Premium streetwear e-commerce platform. "Wear Your Vibe. Own Your Story."
 
 ## Project Structure
 
-This is a monorepo containing three independently deployable applications and two shared packages:
+This is a monorepo containing three independently deployable applications - no code is shared between them:
 
 ```
 premal-kaizen/
@@ -12,17 +12,13 @@ premal-kaizen/
 │   ├── storefront/     # Customer-facing e-commerce website (Next.js)
 │   ├── admin/          # Staff management interface (Next.js)
 │   └── api/            # Backend API (NestJS)
-├── packages/
-│   ├── types/          # Shared TypeScript types and Zod schemas
-│   └── ui/             # Shared React components
-├── docs/               # Project documentation
-└── UI/                 # Design reference images
+└── docs/               # Project documentation
 ```
 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 24.21.0 (see `.nvmrc`)
 - pnpm 12+
 
 ### Installation

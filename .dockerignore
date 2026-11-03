@@ -1,0 +1,64 @@
+# Mirrors .gitignore's intent for the build context, plus Docker-specific exclusions.
+# pnpm-lock.yaml is intentionally NOT listed here - the Dockerfiles need to COPY it
+# for `pnpm install --frozen-lockfile` to mean anything.
+#
+# Unlike .gitignore, Docker's ignore-file patterns are anchored to the build-context
+# root unless prefixed with `**/` - a bare `node_modules/` here would ONLY exclude a
+# root-level node_modules, not apps/*/node_modules (confirmed by testing: without the
+# `**/` prefix, apps/api/node_modules was copied straight from the Windows host into
+# the Linux build stage, clobbering the correctly-built Linux node_modules with
+# Windows-absolute-path symlinks and breaking the build).
+
+# Git history - never needed inside an image, and must never be sent to the build context
+.git/
+.github/
+
+# Dependencies - always reinstalled inside the Linux build stage, never copied from host
+**/node_modules/
+yarn.lock
+package-lock.json
+
+# Build artifacts - regenerated inside the image (each app has its own .next/dist)
+**/dist/
+**/build/
+**/.next/
+**/out/
+
+# Environment variables / secrets - never bake these into an image layer
+**/.env
+**/.env.local
+**/.env.*.local
+
+# IDE / OS
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/*~
+**/.DS_Store
+**/Thumbs.db
+
+# Testing
+**/coverage/
+**/.nyc_output/
+
+# Logs
+**/logs/
+**/*.log
+
+# Local developer data - never bake a populated dev database or local uploads into an image
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+apps/api/prisma/backups/
+apps/api/prisma/schema.*-test.prisma
+apps/api/prisma/generated/
+
+# Docs/design assets - not needed at runtime
+docs/
+*.md
+logo for apparel.docx
+
+# Docker build debug artifacts (shouldn't exist in a real build, defensive only)
+Dockerfile.debug
