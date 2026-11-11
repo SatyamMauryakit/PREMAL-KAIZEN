@@ -108,15 +108,109 @@ serialization; it should still be correct under Postgres's stronger concurrency
 guarantees, but this is exactly the kind of thing worth a dedicated concurrent-order
 load test once RDS is real, not something provable by reading code alone.
 
-## Summary
+## Re-audit, 2026-11-11 (same day, follow-up pass) — new concrete evidence
+
+This pass re-verified the above from scratch (not reused blindly) and found two
+additional, concrete pieces of evidence that strengthen the same conclusion:
+
+- **`apps/api/prisma/migrations/migration_lock.toml` explicitly contains
+  `provider = "sqlite"`.** This is Prisma's own enforcement mechanism — it means
+  attempting to run `prisma migrate dev`/`deploy` with a `postgresql`-provider schema
+  **against this same `migrations/` folder would be rejected by Prisma itself**
+  (provider mismatch), independent of any decision made here. This is further,
+  mechanical confirmation that fresh Postgres migrations must live in their own
+  separate migration history, not be appended to or generated into the existing
+  SQLite one.
+- **Inspected a representative redefine-table migration in full**
+  (`20261110194804_add_otp_attempt_tracking/migration.sql` — one of the 5 migration
+  files, out of 11 total, that use this pattern). It is pure SQLite boilerplate:
+  `PRAGMA defer_foreign_keys`/`foreign_keys` toggling, a full `CREATE TABLE new_X`,
+  `INSERT INTO new_X SELECT ... FROM X`, `DROP TABLE X`, `ALTER TABLE new_X RENAME TO
+  X`, done because SQLite cannot `ALTER TABLE ... ADD COLUMN` with certain
+  constraints directly. The equivalent Postgres migration for this exact same schema
+  change would be a single `ALTER TABLE "VerificationToken" ADD COLUMN "attempts"
+  INTEGER NOT NULL DEFAULT 0;` statement — trivially simple, and further confirmation
+  that hand-translating these 11 files would be pure wasted effort compared to
+  generating fresh DDL directly against Postgres.
+- **`apps/api/prisma/seed.ts` audited** (not covered in the first pass): uses only
+  `prisma.user.upsert`, a standard provider-agnostic Prisma Client call. No SQLite-
+  specific code. Confirmed safe as-is for either provider.
+
+## Docker availability — re-checked, still unavailable; execution stopped per instruction
+
+`docker --version` succeeds (29.8.2 installed) but `docker info` fails — **the Docker
+daemon is not running on this development machine**, confirmed again (same result as
+every previous check this entire engagement). Per explicit instruction or this task
+("if Docker is unavailable, stop execution and provide exact manual testing
+instructions instead"), **no disposable PostgreSQL container was started, no
+migrations were generated, and no test was run against PostgreSQL in this pass.**
+Steps 3–7 of the requested task (disposable Postgres container, generating/testing
+migrations, running API tests against Postgres, verifying health/readiness against
+Postgres) are **not done** — not attempted, not simulated, not assumed to pass.
+
+## Manual testing instructions (run these yourself wherever Docker — or any Postgres — is actually available: the EC2 host, a machine with Docker Desktop running, or any throwaway Postgres instance)
+
+```bash
+# 1. Start a disposable, local-only Postgres container (no cloud cost, no RDS):
+docker run --rm -d --name premal-pg-test \
+  -e POSTGRES_USER=premal -e POSTGRES_PASSWORD=test -e POSTGRES_DB=premal_test \
+  -p 5433:5432 postgres:16-alpine
+
+# 2. From apps/api, generate a fresh migration history against it using the
+#    prepared postgres-test schema (NOT the real schema.prisma - this never touches
+#    the real SQLite migrations/ folder, since the postgres-test schema has no
+#    migrations directory of its own yet; Prisma will create one):
+cd apps/api
+DATABASE_URL="postgresql://premal:test@localhost:5433/premal_test" \
+  npx prisma migrate dev --schema=prisma/schema.postgres-test.prisma --name init
+
+# 3. Review the generated SQL by hand (it will be under a new
+#    prisma/postgres-migrations/ or similar - inspect exactly what `migrate dev`
+#    created before trusting it) - look specifically for: every table present,
+#    every index/unique constraint present, no unexpected default-value drift.
+
+# 4. Re-apply from scratch to prove `migrate deploy` (the production-safe, non-
+#    interactive command) works against a truly empty database too:
+docker exec premal-pg-test psql -U premal -d premal_test -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+DATABASE_URL="postgresql://premal:test@localhost:5433/premal_test" \
+  npx prisma migrate deploy --schema=prisma/schema.postgres-test.prisma
+
+# 5. Generate the postgres-test Prisma Client and point a throwaway copy of the API
+#    at it to confirm the app actually boots and its health endpoints pass against
+#    real Postgres (NEVER point the real running app/.env at this - use a separate
+#    shell/env):
+DATABASE_URL="postgresql://premal:test@localhost:5433/premal_test" npx prisma generate --schema=prisma/schema.postgres-test.prisma
+DATABASE_URL="postgresql://premal:test@localhost:5433/premal_test" pnpm run dev   # in a throwaway terminal, NOT the real dev session
+curl http://localhost:3002/api/health
+curl http://localhost:3002/api/health/ready
+
+# 6. Run the existing test suite against this Postgres instance to see how many
+#    pass unmodified (most are Prisma-mocked unit tests and will be unaffected;
+#    any that directly exercise a real DB connection are the interesting ones):
+DATABASE_URL="postgresql://premal:test@localhost:5433/premal_test" pnpm vitest run
+
+# 7. Tear down - this was disposable, nothing here needs to persist:
+docker stop premal-pg-test
+```
+
+**Never** run `prisma migrate reset` or `db push --force-reset` in any of the above —
+`migrate dev`/`migrate deploy` only, exactly as used above. None of the commands above
+touch `apps/api/prisma/dev.db`, the real `apps/api/prisma/migrations/` SQLite history,
+or any `.env`/production configuration.
+
+## Summary (updated)
 
 | Item | Status |
 |---|---|
-| Schema audit | ✅ Done — minimal risk found |
-| Migration-file audit | ✅ Done — plan is "regenerate fresh," not "translate" |
+| Schema audit | ✅ Done — minimal risk found, re-confirmed this pass |
+| Migration-file audit | ✅ Done — `migration_lock.toml` provider-lock + a concrete redefine-table example now documented |
+| Seed script audit | ✅ Done this pass — provider-agnostic, no changes needed |
 | App code audit | ✅ Done — zero changes needed |
 | Adapted schema prepared | ✅ Done (`schema.postgres-test.prisma`, refreshed) |
-| Fresh Postgres migrations generated | ❌ Not done — needs a real Postgres instance |
-| RDS provisioned | ❌ Not done — needs your explicit approval |
+| Disposable Postgres container tested | ❌ **Not done — Docker daemon unavailable, execution stopped per instruction** |
+| Fresh Postgres migrations generated | ❌ Not done — needs a real Postgres instance (manual instructions above) |
+| API tests run against Postgres | ❌ Not done — same blocker |
+| Health/readiness verified against Postgres | ❌ Not done — same blocker |
+| RDS provisioned | ❌ Not done — needs your explicit approval, not attempted |
 | Data migrated | ❌ Not done, and never will be — clean DB only, by design |
-| SQLite `dev.db` preserved | ✅ Untouched, plus the pre-cleanup backup from the prior session |
+| SQLite `dev.db` / production `DATABASE_URL` / Razorpay mode | ✅ Untouched — confirmed, no production or billable system was connected to or modified |
