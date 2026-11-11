@@ -127,6 +127,32 @@ export const orderService = {
   timelineForOrder(order: Order): OrderTimeline[] {
     return generateTimeline(order);
   },
+
+  // Shared by every "Download Invoice" button (order detail page, account
+  // invoices list) so the fetch/blob/filename logic exists in exactly one place.
+  // Throws with a user-facing message on failure rather than silently no-oping.
+  async downloadInvoice(orderId: string, orderNumber: string, token: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/orders/${orderId}/invoice/pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error('Invoice not available yet.');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoice-${orderNumber}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  // An invoice only exists once payment is settled (COD orders are invoiced
+  // immediately since payment is collected on delivery; online orders need a
+  // completed payment first) - matches the same rule the order detail page uses.
+  isInvoiceable(order: Pick<Order, 'paymentStatus' | 'paymentMethod'>): boolean {
+    return order.paymentStatus === 'completed' || order.paymentMethod === 'cod';
+  },
 };
 
 

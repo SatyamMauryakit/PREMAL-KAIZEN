@@ -16,14 +16,26 @@ export interface AuthContextType {
   sessionToken: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, firstName?: string, lastName?: string) => Promise<void>;
+  /**
+   * Step 1 of the mandatory two-step login flow: validates credentials only.
+   * Returns `{ requiresOtp: true }` for every customer account (a fresh login
+   * OTP has been emailed; no session is created yet - call verifyLoginOtp to
+   * finish logging in) or `{ requiresOtp: false }` for an admin account
+   * (session is already established, exactly like the old single-step login).
+   */
+  login: (email: string, password: string) => Promise<{ requiresOtp: boolean }>;
+  /** Step 2: the only call that can turn a pending customer login into a real session. */
+  verifyLoginOtp: (email: string, otp: string) => Promise<void>;
+  resendLoginOtp: (email: string) => Promise<void>;
+  register: (email: string, password: string, firstName?: string, lastName?: string, phoneNumber?: string) => Promise<void>;
   logout: () => Promise<void>;
   verifyEmail: (token: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
   updateProfile: (data: { firstName?: string; lastName?: string; phoneNumber?: string }) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  sendOtp: (email: string) => Promise<void>;
+  verifyOtp: (email: string, otp: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -69,7 +81,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     hydrateAuth();
   }, [API_BASE]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<{ requiresOtp: boolean }> => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/auth/login`, {
@@ -78,12 +90,50 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         body: JSON.stringify({ email, password }),
       });
 
+      const data = await response.json();
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Login failed');
+        const err = new Error(data.message || 'Login failed') as Error & { code?: string; email?: string };
+        err.code = data.code;
+        err.email = data.email;
+        throw err;
       }
 
+      if (data.requiresOtp) {
+        // A fresh login OTP has been emailed - no session exists yet. Never
+        // set `user`/`sessionToken` here; the backend has not issued one, and
+        // the old bug this flow replaces was exactly this: treating a
+        // correct password as "logged in" before any OTP was ever verified.
+        return { requiresOtp: true };
+      }
+
+      // Admin accounts only (see IdentityService.login) - a real session was
+      // already issued directly, no OTP step required.
+      setUser(data.user);
+      setSessionToken(data.sessionToken);
+      localStorage.setItem('sessionToken', data.sessionToken);
+      return { requiresOtp: false };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verifyLoginOtp = async (email: string, otp: string) => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/login/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp }),
+      });
+
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Verification failed');
+      }
+
+      // This is the only place a customer session is ever created, mirroring
+      // the backend: a correct password alone (login() above) never sets
+      // `user`/`sessionToken` for a customer - only a verified OTP does.
       setUser(data.user);
       setSessionToken(data.sessionToken);
       localStorage.setItem('sessionToken', data.sessionToken);
@@ -92,13 +142,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const register = async (email: string, password: string, firstName?: string, lastName?: string) => {
+  const resendLoginOtp = async (email: string) => {
+    const response = await fetch(`${API_BASE}/api/auth/login/resend-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Could not resend verification code');
+    }
+  };
+
+  const register = async (email: string, password: string, firstName?: string, lastName?: string, phoneNumber?: string) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, firstName, lastName }),
+        body: JSON.stringify({ email, password, firstName, lastName, phoneNumber }),
       });
 
       if (!response.ok) {
@@ -106,11 +168,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         throw new Error(error.message || 'Registration failed');
       }
 
-      const data = await response.json();
-      // Auto-login after registration
-      if (data.user) {
-        setUser(data.user);
-      }
+      // Registration never returns a session token - the account still needs
+      // email OTP verification before it can log in (the backend now enforces
+      // this). Setting `user` here used to make the UI look logged in with no
+      // real session at all (every authenticated API call would 401 against
+      // a null token) and with no verification ever having happened. Leave
+      // auth state untouched; the register page itself routes to the
+      // verify-email step, and the customer logs in for real afterward.
     } finally {
       setIsLoading(false);
     }
@@ -156,6 +220,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.message || 'Password reset request failed');
+    }
+  };
+
+  const sendOtp = async (email: string) => {
+    const response = await fetch(`${API_BASE}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Could not send verification code');
+    }
+  };
+
+  const verifyOtp = async (email: string, otp: string) => {
+    const response = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, otp }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Verification failed');
+    }
+    // Refresh user state to pick up the new emailVerified timestamp
+    const me = await fetch(`${API_BASE}/api/auth/me`, {
+      headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+    });
+    if (me.ok) {
+      const data = await me.json();
+      setUser(data.user);
     }
   };
 
@@ -215,6 +311,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isLoading,
         isAuthenticated: !!user,
         login,
+        verifyLoginOtp,
+        resendLoginOtp,
         register,
         logout,
         verifyEmail,
@@ -222,6 +320,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resetPassword,
         updateProfile,
         changePassword,
+        sendOtp,
+        verifyOtp,
       }}
     >
       {children}

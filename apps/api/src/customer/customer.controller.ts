@@ -1,5 +1,6 @@
 import { Controller, Get, Put, Post, Delete, Param, Body, Request, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { CustomerService } from './customer.service';
+import { CartService } from './cart.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 
 /**
@@ -11,7 +12,10 @@ import { AuthGuard } from '../common/guards/auth.guard';
 @UseGuards(AuthGuard)
 @Controller('api/customer')
 export class CustomerController {
-  constructor(private customerService: CustomerService) {}
+  constructor(
+    private customerService: CustomerService,
+    private cartService: CartService,
+  ) {}
 
   // ========================================================================
   // PROFILE ENDPOINTS
@@ -102,6 +106,40 @@ export class CustomerController {
   async deleteAddress(@Request() req: any, @Param('id') addressId: string) {
     const userId = this.extractUserId(req);
     return this.customerService.deleteAddress(userId, addressId);
+  }
+
+  // ========================================================================
+  // CART SYNC ENDPOINTS (Section 3: admin cart visibility)
+  // ========================================================================
+  //
+  // The storefront's own cart UI is localStorage-driven and unaffected by
+  // these routes - this is a one-way background mirror so admins can see
+  // what's in a logged-in customer's cart. userId always comes from the
+  // verified session (never the request body), so a customer can only ever
+  // read or write their own persisted cart - never another customer's.
+
+  /** GET /api/customer/cart */
+  @Get('cart')
+  async getCart(@Request() req: any) {
+    const userId = this.extractUserId(req);
+    return this.cartService.getCartForUser(userId);
+  }
+
+  /** PUT /api/customer/cart - replaces the persisted cart with the given items. */
+  @Put('cart')
+  async syncCart(
+    @Request() req: any,
+    @Body() body: { items: Array<{ productId: string; quantity: number; selectedSize?: string; selectedColor?: string }> },
+  ) {
+    const userId = this.extractUserId(req);
+    return this.cartService.syncCart(userId, Array.isArray(body.items) ? body.items : []);
+  }
+
+  /** DELETE /api/customer/cart - called once the local cart is cleared (e.g. after checkout). */
+  @Delete('cart')
+  async clearCart(@Request() req: any) {
+    const userId = this.extractUserId(req);
+    return this.cartService.clearCart(userId);
   }
 
   // ========================================================================

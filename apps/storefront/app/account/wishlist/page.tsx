@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useWishlist } from '@/lib/wishlist-context';
 import { useCart } from '@/lib/cart-context';
+import { formatPrice } from '@/lib/pricing';
 
 export default function WishlistPage() {
   const { items, removeItem } = useWishlist();
@@ -40,7 +41,7 @@ export default function WishlistPage() {
               />
               <div className="p-4">
                 <h3 className="font-semibold text-black mb-2">{item.name}</h3>
-                <p className="text-beige font-bold mb-4">₹{(item.price / 100).toLocaleString('en-IN')}</p>
+                <p className="text-beige font-bold mb-4">{formatPrice(item.price)}</p>
                 <div className="flex flex-col gap-2">
                   <button
                     onClick={() => handleAddToCart(item)}

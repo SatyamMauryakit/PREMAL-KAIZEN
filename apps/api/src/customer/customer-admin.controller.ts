@@ -1,12 +1,19 @@
 import { Controller, Get, Put, Param, Query, Body, BadRequestException, UseGuards } from '@nestjs/common';
 import { CustomerAdminService } from './customer-admin.service';
+import { CartService } from './cart.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+@RequirePermission('customers:view')
 @Controller('api/admin/customers')
 export class CustomerAdminController {
-  constructor(private customerAdminService: CustomerAdminService) {}
+  constructor(
+    private customerAdminService: CustomerAdminService,
+    private cartService: CartService,
+  ) {}
 
   @Get()
   async findAll(@Query() query: any) {
@@ -44,6 +51,19 @@ export class CustomerAdminController {
     return this.customerAdminService.getCustomerDataExport(id);
   }
 
+  /**
+   * GET /api/admin/customers/:id/cart
+   * Read-only view of a single customer's current persisted cart (Section 3).
+   * Confirms the customer exists first so an invalid id 404s cleanly rather
+   * than returning an empty cart indistinguishable from "cart is empty".
+   */
+  @Get(':id/cart')
+  async getCart(@Param('id') id: string) {
+    await this.customerAdminService.findById(id); // throws NotFoundException if missing
+    return this.cartService.getCartForUser(id);
+  }
+
+  @RequirePermission('customers:manage')
   @Put(':id/status')
   async setStatus(@Param('id') id: string, @Body() body: any) {
     if (body.isActive === undefined) {

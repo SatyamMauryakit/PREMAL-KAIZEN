@@ -1,14 +1,15 @@
 import { Module } from '@nestjs/common';
 import { WishlistService } from './wishlist.service';
+import { WishlistController } from './wishlist.controller';
 
 /**
  * WishlistModule
- * Encapsulates wishlist functionality.
- * Currently: Client-side via React Context + localStorage
- * Future (Phase 6+): Server-backed wishlist with database persistence
+ * Server-backed wishlist (WishlistItem table), self-serve routes under
+ * /api/customer/wishlist - mirrors the cart module's pattern.
  */
 @Module({
   providers: [WishlistService],
+  controllers: [WishlistController],
   exports: [WishlistService],
 })
 export class WishlistModule {}

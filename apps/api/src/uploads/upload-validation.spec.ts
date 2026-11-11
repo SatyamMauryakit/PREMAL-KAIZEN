@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
-import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE_BYTES, imageFileFilter } from './upload-validation';
+import { ALLOWED_MIME_TYPES, MAX_FILE_SIZE_BYTES, imageFileFilter, safeExtensionFor } from './upload-validation';
 
 describe('upload-validation', () => {
   it('declares the expected allowed image types and a 5MB size limit', () => {
@@ -29,6 +29,23 @@ describe('upload-validation', () => {
       const callback = vi.fn();
       imageFileFilter({}, { mimetype: 'image/svg+xml' }, callback);
       expect(callback).toHaveBeenCalledWith(expect.any(BadRequestException), false);
+    });
+  });
+
+  describe('safeExtensionFor', () => {
+    it.each([
+      ['image/jpeg', '.jpg'],
+      ['image/png', '.png'],
+      ['image/webp', '.webp'],
+      ['image/gif', '.gif'],
+    ])('maps %s to %s', (mimetype, expected) => {
+      expect(safeExtensionFor(mimetype)).toBe(expected);
+    });
+
+    it('falls back to a safe default for an unrecognized MIME type', () => {
+      // Unreachable via imageFileFilter in production (it rejects first), but storage
+      // adapters must never produce an attacker-chosen extension even if called directly.
+      expect(safeExtensionFor('application/x-msdownload')).toBe('.bin');
     });
   });
 });

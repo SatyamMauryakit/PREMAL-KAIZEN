@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { orderService, Order, OrderTimeline, OrderStatus } from '@/lib/order-service';
-import { formatPrice } from '@/lib/pricing';
+import { formatPaise } from '@/lib/pricing';
 import Link from 'next/link';
 
 const STATUS_SEQUENCE: OrderStatus[] = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
@@ -66,6 +66,18 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
 
   const statusIndex = STATUS_SEQUENCE.indexOf(order.orderStatus);
 
+  const handleDownloadInvoice = async () => {
+    const token = localStorage.getItem('sessionToken');
+    if (!token) return;
+    try {
+      await orderService.downloadInvoice(order.id, order.orderNumber, token);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not download invoice. Please try again.');
+    }
+  };
+
+  const isInvoiceable = orderService.isInvoiceable(order);
+
   return (
     <div className="space-y-8">
       <Link href="/account/orders" className="text-black font-medium hover:underline">← Back to Orders</Link>
@@ -77,7 +89,7 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
             <h1 className="text-3xl font-bold text-black mb-2">Order {order.orderNumber}</h1>
             <p className="text-gray-600">{new Date(order.createdAt).toLocaleDateString('en-IN')}</p>
           </div>
-          <div className="text-right">
+          <div className="flex flex-col items-end gap-3">
             <span className={`inline-block px-4 py-2 rounded text-sm font-bold ${
               order.orderStatus === 'delivered' ? 'bg-green-100 text-green-800' :
               order.orderStatus === 'cancelled' ? 'bg-red-100 text-red-800' :
@@ -85,6 +97,17 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
             }`}>
               {order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1).replace('_', ' ')}
             </span>
+            {isInvoiceable && (
+              <button
+                onClick={handleDownloadInvoice}
+                className="mt-3 flex items-center gap-2 px-4 py-2 border border-black text-black text-sm font-medium rounded hover:bg-black hover:text-cream transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Download Invoice
+              </button>
+            )}
           </div>
         </div>
 
@@ -131,7 +154,7 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
                 {item.selectedColor && <p className="text-xs text-gray-600">Color: {item.selectedColor}</p>}
                 <p className="text-sm text-gray-600 mt-1">Qty: {item.quantity}</p>
               </div>
-              <p className="font-bold text-black text-right">{formatPrice(item.price * item.quantity)}</p>
+              <p className="font-bold text-black text-right">{formatPaise(item.price * item.quantity)}</p>
             </div>
           ))}
         </div>
@@ -143,10 +166,10 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
         <div className="bg-white rounded-lg shadow-md p-8">
           <h2 className="font-bold text-black mb-6">Order Totals</h2>
           <div className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-gray-700">Subtotal</span><span className="font-medium">{formatPrice(order.subtotal)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-700">Shipping</span><span className="font-medium">{order.shipping === 0 ? 'FREE' : formatPrice(order.shipping)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-700">Tax</span><span className="font-medium">{formatPrice(order.tax)}</span></div>
-            <div className="flex justify-between pt-3 border-t font-bold text-black"><span>Total</span><span>{formatPrice(order.total)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-700">Subtotal</span><span className="font-medium">{formatPaise(order.subtotal)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-700">Shipping</span><span className="font-medium">{order.shipping === 0 ? 'FREE' : formatPaise(order.shipping)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-700">Tax</span><span className="font-medium">{formatPaise(order.tax)}</span></div>
+            <div className="flex justify-between pt-3 border-t font-bold text-black"><span>Total</span><span>{formatPaise(order.total)}</span></div>
           </div>
         </div>
 

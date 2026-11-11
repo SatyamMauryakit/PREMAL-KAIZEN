@@ -48,7 +48,7 @@ describe('LocalStorageAdapter', () => {
     expect(a.key).not.toBe(b.key);
   });
 
-  it('preserves the original file extension', async () => {
+  it('derives the saved extension from the validated MIME type', async () => {
     const adapter = new LocalStorageAdapter(testDir);
     const result = await adapter.save(
       makeFile({ originalname: 'banner.webp', mimetype: 'image/webp' }),
@@ -56,6 +56,21 @@ describe('LocalStorageAdapter', () => {
     );
 
     expect(result.key.endsWith('.webp')).toBe(true);
+  });
+
+  it('ignores a spoofed original filename extension, using the MIME type instead (upload bypass regression)', async () => {
+    // imageFileFilter only checks `mimetype`, which the client also controls - a request
+    // can declare mimetype "image/jpeg" while naming the file "payload.html". If the
+    // saved extension came from `originalname`, this would write a .html file into the
+    // publicly-served uploads/ directory (stored XSS). It must come from the MIME type.
+    const adapter = new LocalStorageAdapter(testDir);
+    const result = await adapter.save(
+      makeFile({ originalname: 'payload.html', mimetype: 'image/jpeg' }),
+      { protocol: 'http', host: 'localhost:3002' },
+    );
+
+    expect(result.key.endsWith('.jpg')).toBe(true);
+    expect(result.key.endsWith('.html')).toBe(false);
   });
 
   it('creates the target directory if it does not already exist', async () => {

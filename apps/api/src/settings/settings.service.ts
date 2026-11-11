@@ -60,7 +60,7 @@ export class SettingsService {
         data: {
           id: this.SINGLETON_ID,
           storeName: 'PREMAL KAIZEN',
-          storeEmail: 'support@premalkaizen.com',
+          storeEmail: 'premal.kaizen@gmail.com',
           storePhone: '+91-XXX-XXX-XXXX',
           timezone: 'Asia/Kolkata',
           locale: 'en-IN',

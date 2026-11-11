@@ -1,11 +1,135 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const VALID_ADJUSTMENT_TYPES = ['received', 'correction', 'damage', 'manual_reconciliation', 'reserved', 'released'];
 
 @Injectable()
 export class InventoryService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(InventoryService.name);
+
+  constructor(private prisma: PrismaService) { }
+
+  // =========================================================================
+  // Order-lifecycle stock management
+  // =========================================================================
+
+  /**
+   * Atomically decrement onHand for every line item in an order.
+   * Must be called INSIDE the order-creation $transaction so a stock
+   * check failure rolls back the entire order atomically.
+   *
+   * Uses a conditional `updateMany({ where: { onHand: { gte: qty } } })` so
+   * two concurrent orders for the same variant cannot both succeed when only
+   * one unit remains (the second write finds count=0 and throws, rolling back).
+   *
+   * If no inventory row exists for a variant we silently skip (the store only
+   * enforces stock limits where a row is configured; absent rows = unlimited).
+   */
+  async decrementForOrder(
+    items: Array<{ productId: string; quantity: number; selectedSize?: string | null; selectedColor?: string | null }>,
+    tx: Prisma.TransactionClient,
+    orderId: string,
+  ): Promise<void> {
+    for (const item of items) {
+      const size = item.selectedSize || null;
+      const color = item.selectedColor || null;
+
+      const inv = await this.findInventoryByVariant(tx as any, item.productId, size, color);
+
+      // No inventory row = stock not tracked for this variant; allow the order.
+      if (!inv) continue;
+
+      const available = inv.onHand - inv.reserved;
+      if (available < item.quantity) {
+        throw new BadRequestException(
+          `Insufficient stock for product ${item.productId}` +
+          (size ? ` (size ${size})` : '') +
+          (color ? ` (color ${color})` : '') +
+          `. Available: ${available}, requested: ${item.quantity}`,
+        );
+      }
+
+      // Atomic conditional decrement — write only succeeds when onHand is still
+      // enough at the moment of the write, guarding against concurrent orders.
+      const result = await tx.inventory.updateMany({
+        where: {
+          id: inv.id,
+          onHand: { gte: inv.reserved + item.quantity },
+        },
+        data: { onHand: { decrement: item.quantity } },
+      });
+
+      if (result.count === 0) {
+        throw new BadRequestException(
+          `Stock was taken by a concurrent order for product ${item.productId}` +
+          (size ? ` (size ${size})` : '') +
+          (color ? ` (color ${color})` : '') +
+          `. Please try again.`,
+        );
+      }
+
+      await tx.inventoryAuditLog.create({
+        data: {
+          inventoryId: inv.id,
+          previousOnHand: inv.onHand,
+          newOnHand: inv.onHand - item.quantity,
+          previousReserved: inv.reserved,
+          newReserved: inv.reserved,
+          changeType: 'order_placed',
+          reason: `Order placed: deducted ${item.quantity} unit(s)`,
+          reference: orderId,
+        },
+      });
+    }
+  }
+
+  /**
+   * Restore onHand after a cancellation or refund.
+   * Called after the status change is committed. Idempotent — if the inventory
+   * row doesn't exist it silently continues (nothing was tracked, nothing to restore).
+   */
+  async restoreForCancellation(
+    items: Array<{ productId: string; quantity: number; selectedSize?: string | null; selectedColor?: string | null }>,
+    orderId: string,
+  ): Promise<void> {
+    for (const item of items) {
+      const size = item.selectedSize || null;
+      const color = item.selectedColor || null;
+
+      const inv = await this.findInventoryByVariant(this.prisma as any, item.productId, size, color);
+
+      if (!inv) continue;
+
+      await this.prisma.inventory.update({
+        where: { id: inv.id },
+        data: { onHand: { increment: item.quantity } },
+      });
+
+      await this.prisma.inventoryAuditLog.create({
+        data: {
+          inventoryId: inv.id,
+          previousOnHand: inv.onHand,
+          newOnHand: inv.onHand + item.quantity,
+          previousReserved: inv.reserved,
+          newReserved: inv.reserved,
+          changeType: 'order_cancelled',
+          reason: `Order cancelled/refunded: restored ${item.quantity} unit(s)`,
+          reference: orderId,
+        },
+      });
+
+      this.logger.log(
+        `Restored ${item.quantity}× product ${item.productId}` +
+        (size ? ` size ${size}` : '') + (color ? ` color ${color}` : '') +
+        ` for order ${orderId}`,
+      );
+    }
+  }
+
+  // =========================================================================
+  // Admin inventory management
+  // =========================================================================
 
   /**
    * Get inventory with filters and pagination
@@ -70,11 +194,14 @@ export class InventoryService {
       this.prisma.inventory.count({ where: whereClause }),
     ]);
 
+    const soldByVariant = await this.getSoldQuantities(inventory.map(inv => inv.productId));
+
     return {
       data: inventory.map(inv => ({
         ...inv,
         available: Math.max(0, inv.onHand - inv.reserved),
         status: this.getInventoryStatus(inv),
+        sold: soldByVariant.get(this.variantKey(inv.productId, inv.size, inv.color)) ?? 0,
       })),
       total,
       page,
@@ -83,34 +210,68 @@ export class InventoryService {
   }
 
   /**
+   * Total units historically sold per (productId, size, color), for admin
+   * visibility alongside on-hand/reserved stock. "Sold" means net units that
+   * actually left stock - order items from cancelled orders are excluded since
+   * restoreForCancellation already put that stock back, so counting them too
+   * would double-count against what's physically on hand.
+   */
+  private async getSoldQuantities(productIds: string[]): Promise<Map<string, number>> {
+    const uniqueIds = Array.from(new Set(productIds));
+    const map = new Map<string, number>();
+    if (uniqueIds.length === 0) return map;
+
+    const grouped = await this.prisma.orderItem.groupBy({
+      by: ['productId', 'selectedSize', 'selectedColor'],
+      where: {
+        productId: { in: uniqueIds },
+        order: { status: { not: 'cancelled' } },
+      },
+      _sum: { quantity: true },
+    });
+
+    for (const row of grouped) {
+      map.set(this.variantKey(row.productId, row.selectedSize, row.selectedColor), row._sum.quantity ?? 0);
+    }
+    return map;
+  }
+
+  private variantKey(productId: string, size: string | null, color: string | null): string {
+    return `${productId}|${size ?? ''}|${color ?? ''}`;
+  }
+
+  /**
    * Get inventory by product ID and variant
    */
   async getInventoryByVariant(productId: string, size?: string, color?: string) {
-    const whereClause: any = {
+    const row = await this.findInventoryByVariant(
+      this.prisma as any,
       productId,
-      size: size || null,
-      color: color || null,
-    };
+      size ?? null,
+      color ?? null,
+    );
 
+    if (!row) {
+      throw new NotFoundException('Inventory not found for this variant');
+    }
+
+    // Re-fetch with full product include now that we have the row id.
     const inventory = await this.prisma.inventory.findUnique({
-      where: {
-        productId_size_color: whereClause,
-      },
-      include: {
-        product: {
-          include: { category: true, images: { take: 1 } },
-        },
-      },
+      where: { id: row.id },
+      include: { product: { include: { category: true, images: { take: 1 } } } },
     });
 
     if (!inventory) {
       throw new NotFoundException('Inventory not found for this variant');
     }
 
+    const soldByVariant = await this.getSoldQuantities([inventory.productId]);
+
     return {
       ...inventory,
       available: Math.max(0, inventory.onHand - inventory.reserved),
       status: this.getInventoryStatus(inventory),
+      sold: soldByVariant.get(this.variantKey(inventory.productId, inventory.size, inventory.color)) ?? 0,
     };
   }
 
@@ -192,20 +353,32 @@ export class InventoryService {
     }
 
     // Get or create inventory record
-    const whereClause = {
-      productId_size_color: {
-        productId,
-        size: data.size || null,
-        color: data.color || null,
-      },
-    };
+    let inventory = await this.findInventoryByVariant(
+      this.prisma as any,
+      productId,
+      data.size ?? null,
+      data.color ?? null,
+    );
 
-    let inventory = await this.prisma.inventory.findUnique({
-      where: whereClause as any,
-      include: { product: true },
-    });
+    // If found, re-fetch with product include so downstream code has product.name etc.
+    if (inventory) {
+      inventory = await this.prisma.inventory.findUnique({
+        where: { id: inventory.id },
+        include: { product: true },
+      }) ?? inventory;
+    }
 
     if (!inventory) {
+      // No existing row for this exact productId+size+color - before creating one,
+      // confirm the productId is real. Skipping this check would let a bad id (e.g.
+      // an inventory row's own id passed where a product id was expected) reach
+      // Prisma's create() and fail on the FK constraint as an unhandled 500, instead
+      // of a clear, actionable error.
+      const productExists = await this.prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
+      if (!productExists) {
+        throw new NotFoundException(`Product with ID ${productId} not found`);
+      }
+
       // Create new inventory record
       inventory = await this.prisma.inventory.create({
         data: {
@@ -291,15 +464,9 @@ export class InventoryService {
    * Reserve stock for an order (internal method)
    */
   async reserveStock(productId: string, size?: string, color?: string, quantity?: number) {
-    const inventory = await this.prisma.inventory.findUnique({
-      where: {
-        productId_size_color: {
-          productId,
-          size: size || null,
-          color: color || null,
-        } as any,
-      },
-    });
+    const inventory = await this.findInventoryByVariant(
+      this.prisma as any, productId, size ?? null, color ?? null,
+    );
 
     if (!inventory) {
       throw new NotFoundException('Inventory not found');
@@ -340,15 +507,9 @@ export class InventoryService {
    * Release reserved stock (internal method)
    */
   async releaseStock(productId: string, size?: string, color?: string, quantity?: number) {
-    const inventory = await this.prisma.inventory.findUnique({
-      where: {
-        productId_size_color: {
-          productId,
-          size: size || null,
-          color: color || null,
-        } as any,
-      },
-    });
+    const inventory = await this.findInventoryByVariant(
+      this.prisma as any, productId, size ?? null, color ?? null,
+    );
 
     if (!inventory) {
       return null; // Silently return if inventory doesn't exist
@@ -445,14 +606,13 @@ export class InventoryService {
       throw new BadRequestException('Reorder threshold cannot be negative');
     }
 
+    const row = await this.findInventoryByVariant(this.prisma as any, productId, size, color);
+    if (!row) {
+      throw new NotFoundException('Inventory not found for this variant');
+    }
+
     const updated = await this.prisma.inventory.update({
-      where: {
-        productId_size_color: {
-          productId,
-          size: size || null,
-          color: color || null,
-        } as any,
-      },
+      where: { id: row.id },
       data: { reorderThreshold: threshold },
       include: {
         product: {
@@ -524,6 +684,29 @@ export class InventoryService {
     }
 
     return { count: created.length };
+  }
+
+  /**
+   * Look up an inventory row by (productId, size, color).
+   *
+   * Prisma 5 on SQLite throws "Argument `size` must not be null" when you pass
+   * `null` into a compound-unique `findUnique` key.  The workaround is to use
+   * `findFirst` with explicit `IS NULL` filters whenever any component is null.
+   * This helper centralises that logic so every caller is correct.
+   */
+  private async findInventoryByVariant(
+    client: { inventory: { findFirst: (args: any) => Promise<any> } },
+    productId: string,
+    size: string | null,
+    color: string | null,
+  ) {
+    return client.inventory.findFirst({
+      where: {
+        productId,
+        size: size === null ? null : size,
+        color: color === null ? null : color,
+      },
+    });
   }
 
   private safeParseArray(value: unknown): string[] {

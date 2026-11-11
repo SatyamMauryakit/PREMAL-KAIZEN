@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminCustomersService, Customer, CustomerStatistics } from '@/lib/customers-service';
@@ -52,7 +53,21 @@ export default function CustomersPage() {
     return `₹${(price / 100).toLocaleString('en-IN', { minimumFractionDigits: 0 })}`;
   };
 
+  const verificationBadge = (status?: Customer['verificationStatus']) => {
+    switch (status) {
+      case 'both_verified':
+        return { label: 'Both Verified', className: 'bg-green-100 text-green-700' };
+      case 'email_verified':
+        return { label: 'Email Verified', className: 'bg-blue-100 text-blue-700' };
+      case 'mobile_verified':
+        return { label: 'Mobile Verified', className: 'bg-blue-100 text-blue-700' };
+      default:
+        return { label: 'Pending Verification', className: 'bg-gray-100 text-gray-700' };
+    }
+  };
+
   return (
+    <RequirePermission permission="customers:view">
     <div className="min-h-screen bg-gray-light">
       <Header
         title="Customers"
@@ -68,7 +83,7 @@ export default function CustomersPage() {
 
         {/* Statistics Cards */}
         {statistics && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-lg border border-gray-light p-6">
               <h3 className="text-sm text-gray-medium font-medium mb-2">Total Customers</h3>
               <p className="text-3xl font-bold text-black">{statistics.totalCustomers}</p>
@@ -84,6 +99,13 @@ export default function CustomersPage() {
                   ? Math.round((statistics.verifiedEmails / statistics.totalCustomers) * 100)
                   : 0}
                 % verified
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-light p-6">
+              <h3 className="text-sm text-gray-medium font-medium mb-2">Fully Verified</h3>
+              <p className="text-3xl font-bold text-green-600">{statistics.fullyVerified}</p>
+              <p className="text-xs text-gray-medium mt-1">
+                Email + mobile ({statistics.verifiedMobiles} mobiles verified)
               </p>
             </div>
             <div className="bg-white rounded-lg border border-gray-light p-6">
@@ -142,6 +164,7 @@ export default function CustomersPage() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Orders</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Total Spent</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Verification</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Joined</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Actions</th>
                   </tr>
@@ -172,6 +195,16 @@ export default function CustomersPage() {
                         >
                           {customer.isActive ? 'Active' : 'Inactive'}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        {(() => {
+                          const badge = verificationBadge(customer.verificationStatus);
+                          return (
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${badge.className}`}>
+                              {badge.label}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-medium">
                         {new Date(customer.createdAt).toLocaleDateString('en-IN')}
@@ -221,5 +254,6 @@ export default function CustomersPage() {
         </div>
       </div>
     </div>
+    </RequirePermission>
   );
 }

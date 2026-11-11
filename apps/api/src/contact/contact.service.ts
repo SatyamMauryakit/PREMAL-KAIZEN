@@ -1,5 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 
 export interface ContactSubmission {
   name: string;
@@ -12,10 +13,14 @@ export interface ContactSubmission {
 
 @Injectable()
 export class ContactService {
+  private readonly logger = new Logger(ContactService.name);
   // Rate-limit tracking only - ephemeral by nature, doesn't need to survive a restart.
   private submissionLog: Map<string, number[]> = new Map();
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   async submitContactForm(submission: ContactSubmission): Promise<{ id: string; message: string }> {
     this.validateSubmission(submission);
@@ -34,7 +39,21 @@ export class ContactService {
 
     this.logSubmission(submission.email);
 
-    // No email-sending integration is configured, so no confirmation email is sent here.
+    // The enquiry is already safely persisted above - a notification-email failure
+    // (or no CONTACT_NOTIFICATION_EMAIL configured) must never lose it or turn this
+    // into a user-facing error, so this is fire-and-forget with its own catch.
+    this.emailService
+      .sendContactEnquiryEmail({
+        name: created.name,
+        email: created.email,
+        subject: created.subject,
+        category: created.category,
+        orderNumber: created.orderNumber,
+        message: created.message,
+      })
+      .catch((err) => {
+        this.logger.error(`Failed to send contact notification email: ${(err as Error).message}`);
+      });
 
     return {
       id: created.id,

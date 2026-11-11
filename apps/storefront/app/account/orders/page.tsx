@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { orderService, Order } from '@/lib/order-service';
 import Link from 'next/link';
-import { formatPrice } from '@/lib/pricing';
+import { formatPaise } from '@/lib/pricing';
 
 export default function OrdersPage() {
   const { user, isLoading } = useAuth();
@@ -79,7 +79,7 @@ export default function OrdersPage() {
                   <p className="text-sm text-gray-600 mt-1">{order.items.length} item{order.items.length !== 1 ? 's' : ''}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-lg font-bold text-black">{formatPrice(order.total)}</p>
+                  <p className="text-lg font-bold text-black">{formatPaise(order.total)}</p>
                   <p className="text-xs text-gray-600 mt-2">→</p>
                 </div>
               </div>

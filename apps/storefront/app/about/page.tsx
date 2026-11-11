@@ -1,6 +1,13 @@
-'use client';
-
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import Image from 'next/image';
+import { buildStaticMetadata } from '@/lib/metadata';
+
+export const metadata: Metadata = buildStaticMetadata({
+  title: 'About Us',
+  description: 'Learn the story behind PREMAL KAIZEN - a premium streetwear brand built on continuous improvement, quality fabric, and modern design.',
+  path: '/about',
+});
 
 export default function AboutPage() {
   return (
@@ -32,12 +39,14 @@ export default function AboutPage() {
               Explore the Collection
             </Link>
           </div>
-          <div className="bg-gray-light rounded-lg aspect-square flex items-center justify-center">
-            <div className="w-48 h-48 flex items-center justify-center">
-              <svg className="w-full h-full text-black opacity-20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4 20h16v-2l-8-6-4 6-4-6V8L4 14z" />
-              </svg>
-            </div>
+          <div className="bg-gray-light rounded-lg aspect-square flex items-center justify-center p-8">
+            <Image
+              src="/logo/logo-stacked-black.png"
+              alt="PREMAL KAIZEN Logo"
+              width={400}
+              height={400}
+              className="w-full h-full object-contain"
+            />
           </div>
         </div>
       </section>

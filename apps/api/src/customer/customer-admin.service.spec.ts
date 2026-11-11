@@ -29,3 +29,46 @@ describe('CustomerAdminService.findAll - search filter (SQLite active, PostgreSQ
     expect(count).toHaveBeenCalledWith({ where: expectedWhere });
   });
 });
+
+describe('CustomerAdminService - combined email/mobile verification status (Section 4)', () => {
+  function makeCustomerRow(emailVerified: Date | null, phoneVerified: Date | null) {
+    return {
+      id: 'cust_1', email: 'a@example.com', firstName: 'A', lastName: 'B', phoneNumber: '+919876543210',
+      isActive: true, emailVerified, phoneVerified, lastLogin: null, createdAt: new Date(), updatedAt: new Date(),
+      _count: { orders: 0, addresses: 0 },
+    };
+  }
+
+  function makeService(customerRow: ReturnType<typeof makeCustomerRow>) {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([customerRow]) // user.findMany (findAll's own query)
+      .mockResolvedValue([]); // order.findMany for enrichment
+    const count = vi.fn().mockResolvedValue(1);
+    const prisma = { user: { findMany, count }, order: { findMany } } as any;
+    return new CustomerAdminService(prisma);
+  }
+
+  it('reports "both_verified" when both email and mobile are verified', async () => {
+    const service = makeService(makeCustomerRow(new Date(), new Date()));
+    const result = await service.findAll({});
+    expect(result.data[0].verificationStatus).toBe('both_verified');
+  });
+
+  it('reports "email_verified" when only email is verified', async () => {
+    const service = makeService(makeCustomerRow(new Date(), null));
+    const result = await service.findAll({});
+    expect(result.data[0].verificationStatus).toBe('email_verified');
+  });
+
+  it('reports "mobile_verified" when only mobile is verified', async () => {
+    const service = makeService(makeCustomerRow(null, new Date()));
+    const result = await service.findAll({});
+    expect(result.data[0].verificationStatus).toBe('mobile_verified');
+  });
+
+  it('reports "pending_verification" when neither is verified', async () => {
+    const service = makeService(makeCustomerRow(null, null));
+    const result = await service.findAll({});
+    expect(result.data[0].verificationStatus).toBe('pending_verification');
+  });
+});

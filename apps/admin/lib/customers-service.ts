@@ -8,6 +8,8 @@ export interface Customer {
   phoneNumber?: string;
   isActive: boolean;
   emailVerified?: string;
+  phoneVerified?: string;
+  verificationStatus?: 'both_verified' | 'email_verified' | 'mobile_verified' | 'pending_verification';
   lastLogin?: string;
   createdAt: string;
   updatedAt: string;
@@ -69,6 +71,8 @@ export interface CustomerStatistics {
   activeCustomers: number;
   inactiveCustomers: number;
   verifiedEmails: number;
+  verifiedMobiles: number;
+  fullyVerified: number;
   totalOrderValue: number;
   avgOrderValue: number;
 }

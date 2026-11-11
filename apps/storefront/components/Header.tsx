@@ -6,6 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useCart } from '@/lib/cart-context';
 import { useWishlist } from '@/lib/wishlist-context';
 import { useAuth } from '@/lib/auth-context';
+import { SearchAutocomplete } from './SearchAutocomplete';
 
 export const Header: React.FC = () => {
   const router = useRouter();
@@ -13,22 +14,12 @@ export const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [cartCount, setCartCount] = useState(0);
   const [wishlistCount, setWishlistCount] = useState(0);
   const [isHydrated, setIsHydrated] = useState(false);
   const cart = useCart();
   const wishlist = useWishlist();
   const { user, logout } = useAuth();
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const query = searchQuery.trim();
-    setSearchOpen(false);
-    if (query) {
-      router.push(`/shop?q=${encodeURIComponent(query)}`);
-    }
-  };
 
   // Update cart and wishlist counts (client-side only to avoid hydration mismatch)
   useEffect(() => {
@@ -98,25 +89,14 @@ export const Header: React.FC = () => {
               </button>
 
               {searchOpen && (
-                <form
-                  onSubmit={handleSearchSubmit}
-                  className="absolute right-0 mt-2 w-64 bg-neutral-800 rounded-lg shadow-lg p-2 z-50 flex gap-2"
-                >
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search products..."
-                    autoFocus
-                    className="flex-1 px-3 py-2 rounded bg-neutral-900 text-cream text-sm placeholder-gray-500 focus:outline-none"
-                  />
-                  <button
-                    type="submit"
-                    className="px-3 py-2 bg-cream text-black text-sm font-medium rounded hover:bg-opacity-90 transition-colors"
-                  >
-                    Go
-                  </button>
-                </form>
+                // Viewport-anchored (fixed left-4 right-4) below md, not button-anchored -
+                // an `absolute right-0` panel this wide would overflow past the left edge
+                // of a narrow screen, since the search icon isn't at the true screen edge
+                // there (the hamburger menu sits to its right). Reverts to the normal
+                // button-anchored popover at md+ where there's room for it.
+                <div className="fixed left-4 right-4 top-16 md:absolute md:left-auto md:right-0 md:top-auto md:mt-2 md:w-80 bg-neutral-800 rounded-lg shadow-lg p-2 z-50">
+                  <SearchAutocomplete autoFocus onNavigate={() => setSearchOpen(false)} />
+                </div>
               )}
             </div>
 
@@ -138,56 +118,81 @@ export const Header: React.FC = () => {
               </button>
 
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-neutral-800 rounded-lg shadow-lg py-2 z-50">
+                <div className="absolute right-0 mt-3 w-60 bg-neutral-900 rounded-xl shadow-2xl ring-1 ring-white/10 py-2 z-50 origin-top-right animate-menuIn">
                   {user ? (
                     <>
-                      <div className="px-4 py-2 border-b border-neutral-700">
-                        <p className="text-cream text-sm font-medium">{user.firstName || user.email}</p>
+                      <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-700/80">
+                        <div className="w-9 h-9 rounded-full bg-beige text-neutral-900 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                          {(user.firstName || user.email).charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-cream text-sm font-semibold truncate">{user.firstName || user.email}</p>
+                          {user.firstName && <p className="text-neutral-400 text-xs truncate">{user.email}</p>}
+                        </div>
                       </div>
-                      <Link
-                        href="/account/profile"
-                        className="block px-4 py-2 text-cream hover:bg-neutral-700 transition-colors text-sm"
-                        onClick={() => setUserMenuOpen(false)}
-                      >
-                        My Account
-                      </Link>
-                      <Link
-                        href="/account/addresses"
-                        className="block px-4 py-2 text-cream hover:bg-neutral-700 transition-colors text-sm"
-                        onClick={() => setUserMenuOpen(false)}
-                      >
-                        Addresses
-                      </Link>
-                      <Link
-                        href="/account/security"
-                        className="block px-4 py-2 text-cream hover:bg-neutral-700 transition-colors text-sm"
-                        onClick={() => setUserMenuOpen(false)}
-                      >
-                        Security
-                      </Link>
-                      <button
-                        onClick={async () => {
-                          await logout();
-                          setUserMenuOpen(false);
-                          router.push('/');
-                        }}
-                        className="w-full text-left px-4 py-2 text-cream hover:bg-neutral-700 transition-colors text-sm border-t border-neutral-700"
-                      >
-                        Logout
-                      </button>
+
+                      <div className="py-1.5">
+                        <Link
+                          href="/account/profile"
+                          className="group flex items-center gap-3 px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <svg className="w-4 h-4 text-neutral-400 group-hover:text-beige transition-colors flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                          My Account
+                        </Link>
+                        <Link
+                          href="/account/addresses"
+                          className="group flex items-center gap-3 px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <svg className="w-4 h-4 text-neutral-400 group-hover:text-beige transition-colors flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          Addresses
+                        </Link>
+                        <Link
+                          href="/account/security"
+                          className="group flex items-center gap-3 px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <svg className="w-4 h-4 text-neutral-400 group-hover:text-beige transition-colors flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          Security
+                        </Link>
+                      </div>
+
+                      <div className="pt-1.5 border-t border-neutral-700/80">
+                        <button
+                          onClick={async () => {
+                            await logout();
+                            setUserMenuOpen(false);
+                            router.push('/');
+                          }}
+                          className="w-full flex items-center gap-3 text-left px-4 py-2.5 text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors text-sm"
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                          </svg>
+                          Logout
+                        </button>
+                      </div>
                     </>
                   ) : (
                     <>
                       <Link
                         href="/auth/login"
-                        className="block px-4 py-2 text-cream hover:bg-neutral-700 transition-colors text-sm"
+                        className="block px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         Login
                       </Link>
                       <Link
                         href="/auth/register"
-                        className="block px-4 py-2 text-cream hover:bg-neutral-700 transition-colors text-sm border-t border-neutral-700"
+                        className="block px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm border-t border-neutral-700/80"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         Register

@@ -49,8 +49,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({ products }) => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       {products.map((product) => (
-        <div
+        <Link
           key={product.id}
+          href={`/products/${product.id}`}
           className="group flex flex-col h-full bg-white rounded-lg overflow-hidden border border-gray-light hover:border-gray-medium transition-colors"
         >
           {/* Image Container */}
@@ -87,11 +88,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({ products }) => {
 
           {/* Content */}
           <div className="flex flex-col flex-1 p-4">
-            <Link href={`/products/${product.id}`} className="hover:underline">
-              <h3 className="text-sm font-medium text-black mb-2 line-clamp-2">
-                {product.name}
-              </h3>
-            </Link>
+            <h3 className="text-sm font-medium text-black mb-2 line-clamp-2 group-hover:underline">
+              {product.name}
+            </h3>
 
             {/* Price */}
             <div className="flex items-baseline gap-2 mb-4 mt-auto">
@@ -105,7 +104,16 @@ export const ProductGrid: React.FC<ProductGridProps> = ({ products }) => {
               )}
             </div>
 
-            {/* Add to Cart Button */}
+            {/* View Product - purely visual, the whole card is already the link
+                above, so this doesn't need its own click handler (and nesting a
+                real <button> inside the anchor would be invalid HTML). */}
+            <span className="block w-full text-center px-3 py-2 mb-2 text-xs font-medium rounded border border-black text-black group-hover:bg-black group-hover:text-cream transition-colors">
+              VIEW PRODUCT
+            </span>
+
+            {/* Add to Cart Button - a real button is fine here since it needs its
+                own click handler; e.preventDefault() stops the parent Link from
+                navigating when this is clicked. */}
             <button
               onClick={(e) => {
                 e.preventDefault();
@@ -120,7 +128,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({ products }) => {
               {addedToCart === product.id ? '✓ ADDED' : 'ADD TO CART'}
             </button>
           </div>
-        </div>
+        </Link>
       ))}
     </div>
   );

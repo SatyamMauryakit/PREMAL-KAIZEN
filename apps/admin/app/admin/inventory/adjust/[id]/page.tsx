@@ -17,9 +17,22 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+interface VariantContext {
+  size: string | null;
+  color: string | null;
+  name: string | null;
+  sku: string | null;
+  onHand: string | null;
+}
+
 export default function AdjustInventoryPage({ params }: PageProps) {
   const router = useRouter();
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
+  // `[id]` here is the product ID (see the Inventory list page's link) - the
+  // specific variant to adjust is identified by size/color, carried via the
+  // query string rather than the route param, since one product can have many
+  // inventory rows (one per size/color combination).
+  const [variant, setVariant] = useState<VariantContext>({ size: null, color: null, name: null, sku: null, onHand: null });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,16 +51,16 @@ export default function AdjustInventoryPage({ params }: PageProps) {
   }, [params]);
 
   useEffect(() => {
-    if (resolvedParams?.id) {
-      loadInventory();
-    }
-  }, [resolvedParams?.id]);
-
-  const loadInventory = async () => {
-    // This page doesn't need to load the inventory initially,
-    // as the form is self-contained
+    const search = new URLSearchParams(window.location.search);
+    setVariant({
+      size: search.get('size') || null,
+      color: search.get('color') || null,
+      name: search.get('name'),
+      sku: search.get('sku'),
+      onHand: search.get('onHand'),
+    });
     setLoading(false);
-  };
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -80,6 +93,8 @@ export default function AdjustInventoryPage({ params }: PageProps) {
       if (!token) throw new Error('Not authenticated');
 
       await adminInventoryService.adjustInventory(token, resolvedParams!.id, {
+        size: variant.size || undefined,
+        color: variant.color || undefined,
         type: formData.type,
         quantity: qty,
         reason: formData.reason,
@@ -118,6 +133,18 @@ export default function AdjustInventoryPage({ params }: PageProps) {
         <Link href="/admin/inventory" className="text-black hover:text-gray-dark font-medium mb-6 inline-block">
           ← Back to Inventory
         </Link>
+
+        {variant.name && (
+          <div className="bg-white rounded-lg border border-gray-light p-4 mb-6">
+            <p className="text-sm font-semibold text-black">{variant.name}</p>
+            <p className="text-xs text-gray-medium">
+              SKU: {variant.sku}
+              {variant.size && ` • Size: ${variant.size}`}
+              {variant.color && ` • Color: ${variant.color}`}
+              {variant.onHand !== null && ` • Current stock: ${variant.onHand}`}
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="bg-white rounded-lg border border-gray-light p-6 space-y-6">
           {error && (

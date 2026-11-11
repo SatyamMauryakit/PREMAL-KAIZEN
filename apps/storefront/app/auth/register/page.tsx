@@ -13,6 +13,7 @@ export default function RegisterPage() {
     firstName: '',
     lastName: '',
     email: '',
+    phoneNumber: '',
     password: '',
     confirmPassword: '',
   });
@@ -48,11 +49,15 @@ export default function RegisterPage() {
     }
 
     try {
-      await register(formData.email, formData.password, formData.firstName, formData.lastName);
-      setSuccess('Registration successful! Please check your email to verify your account.');
+      await register(formData.email, formData.password, formData.firstName, formData.lastName, formData.phoneNumber || undefined);
+      setSuccess('Account created! We\'ve sent a verification code to your email.');
       setTimeout(() => {
-        router.push('/auth/login');
-      }, 2000);
+        const next = `/auth/verify-email?email=${encodeURIComponent(formData.email)}`;
+        const withPhone = formData.phoneNumber
+          ? `${next}&phone=${encodeURIComponent(formData.phoneNumber)}`
+          : next;
+        router.push(withPhone);
+      }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     }
@@ -78,7 +83,7 @@ export default function RegisterPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-2">
                   First Name
@@ -126,6 +131,23 @@ export default function RegisterPage() {
                 required
                 disabled={isLoading}
               />
+            </div>
+
+            <div>
+              <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
+                Mobile Number <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                id="phoneNumber"
+                name="phoneNumber"
+                type="tel"
+                value={formData.phoneNumber}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
+                placeholder="9876543210"
+                disabled={isLoading}
+              />
+              <p className="text-xs text-gray-500 mt-1">Add it now to verify your mobile number via SMS.</p>
             </div>
 
             <div>

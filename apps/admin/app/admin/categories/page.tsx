@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminCategoriesService, CategoryResponse } from '@/lib/products-service';
@@ -51,6 +52,7 @@ export default function CategoriesPage() {
   };
 
   return (
+    <RequirePermission permission="categories:manage">
     <div className="min-h-screen bg-gray-light">
       <Header title="Categories" subtitle="Manage product categories." />
 
@@ -131,5 +133,6 @@ export default function CategoriesPage() {
         </div>
       </div>
     </div>
+    </RequirePermission>
   );
 }

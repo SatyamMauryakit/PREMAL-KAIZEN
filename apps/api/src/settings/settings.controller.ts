@@ -2,6 +2,8 @@ import { Controller, Get, Put, Body, Param, Query, Req, UseGuards } from '@nestj
 import { SettingsService, StoreSettingsDTO, ShippingMethod } from './settings.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 
 /**
  * Public, read-only checkout settings - no admin data (no GSTIN, no email/phone).
@@ -43,7 +45,8 @@ export class PublicSettingsController {
   }
 }
 
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+@RequirePermission('settings:view')
 @Controller('api/admin/settings')
 export class SettingsController {
   constructor(private settingsService: SettingsService) {}
@@ -59,6 +62,7 @@ export class SettingsController {
   /**
    * Update store settings
    */
+  @RequirePermission('settings:manage')
   @Put()
   async updateSettings(@Body() updates: StoreSettingsDTO, @Req() req: any) {
     return this.settingsService.updateSettings(updates, req.user.id);
@@ -75,6 +79,7 @@ export class SettingsController {
   /**
    * Update shipping methods
    */
+  @RequirePermission('settings:manage')
   @Put('shipping/methods')
   async updateShippingMethods(@Body() methods: ShippingMethod[], @Req() req: any) {
     return this.settingsService.updateShippingMethods(methods, req.user.id);
@@ -91,6 +96,7 @@ export class SettingsController {
   /**
    * Update tax configuration
    */
+  @RequirePermission('settings:manage')
   @Put('tax')
   async updateTaxConfiguration(
     @Body() data: { rate: number; mode: 'inclusive' | 'exclusive' },
@@ -114,6 +120,7 @@ export class SettingsController {
   /**
    * Update notification preferences
    */
+  @RequirePermission('settings:manage')
   @Put('notifications')
   async updateNotifications(@Body() prefs: any, @Req() req: any) {
     return this.settingsService.updateNotificationPreferences(prefs, req.user.id);
@@ -131,6 +138,7 @@ export class SettingsController {
   /**
    * Set maintenance mode
    */
+  @RequirePermission('settings:manage')
   @Put('maintenance')
   async setMaintenanceMode(
     @Body() data: { enabled: boolean; message: string },
@@ -171,6 +179,7 @@ export class SettingsController {
    * Real payment provider status for the Payment Settings UI - whether Razorpay
    * credentials/webhook secret are actually present, never their values.
    */
+  @RequirePermission('settings:financial')
   @Get('payment-providers')
   async getPaymentProviderStatus() {
     return this.settingsService.getPaymentProviderStatus();

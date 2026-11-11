@@ -4,6 +4,7 @@ import { Header } from '@/components/Header';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminCustomersService, CustomerDetails, Order } from '@/lib/customers-service';
+import { adminCartsService, CartDetails } from '@/lib/carts-service';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -13,6 +14,7 @@ export default function CustomerDetailsPage({ params }: PageProps) {
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
   const [customer, setCustomer] = useState<CustomerDetails | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [cart, setCart] = useState<CartDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,13 +38,15 @@ export default function CustomerDetailsPage({ params }: PageProps) {
       const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
       if (!token) throw new Error('Not authenticated');
 
-      const [customerData, ordersData] = await Promise.all([
+      const [customerData, ordersData, cartData] = await Promise.all([
         adminCustomersService.getCustomer(token, resolvedParams!.id),
         adminCustomersService.getOrderHistory(token, resolvedParams!.id, 1, 10),
+        adminCartsService.getCustomerCart(token, resolvedParams!.id).catch(() => null),
       ]);
 
       setCustomer(customerData);
       setOrders(ordersData.data);
+      setCart(cartData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load customer');
@@ -153,6 +157,13 @@ export default function CustomerDetailsPage({ params }: PageProps) {
                 <div>
                   <p className="text-xs text-gray-medium">Phone</p>
                   <p className="text-sm font-medium text-black">{customer.phoneNumber || '-'}</p>
+                  {customer.phoneNumber && (
+                    customer.phoneVerified ? (
+                      <p className="text-xs text-green-600">✓ Verified</p>
+                    ) : (
+                      <p className="text-xs text-gray-medium">Pending verification</p>
+                    )
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -200,6 +211,43 @@ export default function CustomerDetailsPage({ params }: PageProps) {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Current Cart (Section 3: read-only admin cart visibility) */}
+            {cart && cart.items.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-light p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-semibold text-black">Current Cart</h2>
+                  <span className="text-xs text-gray-medium">
+                    {cart.lastUpdated ? `Updated ${new Date(cart.lastUpdated).toLocaleString('en-IN')}` : ''}
+                  </span>
+                </div>
+                <div className="space-y-3 mb-4">
+                  {cart.items.map((item) => (
+                    <div key={item.id} className="flex items-center gap-3 pb-3 border-b border-gray-light last:border-b-0">
+                      {item.image ? (
+                        <img src={item.image} alt={item.name} className="w-12 h-12 object-cover rounded border border-gray-light" />
+                      ) : (
+                        <div className="w-12 h-12 flex items-center justify-center rounded border border-dashed border-gray-light text-gray-medium text-[10px]">
+                          No image
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-black">{item.name}</p>
+                        <p className="text-xs text-gray-medium">
+                          {[item.selectedSize, item.selectedColor].filter(Boolean).join(' / ') || 'No variant'} • Qty: {item.quantity}
+                        </p>
+                      </div>
+                      <p className="text-sm font-medium text-black">{formatPrice(item.lineTotal)}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-gray-light">
+                  <p className="text-sm text-gray-medium">Cart Subtotal ({cart.itemCount} {cart.itemCount === 1 ? 'unit' : 'units'})</p>
+                  <p className="text-lg font-bold text-black">{formatPrice(cart.subtotal)}</p>
+                </div>
+                <p className="text-xs text-gray-medium mt-3">Read-only — this reflects what the customer currently has saved and cannot be edited here.</p>
               </div>
             )}
 

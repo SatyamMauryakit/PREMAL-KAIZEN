@@ -1,30 +1,62 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import { useState, useEffect } from 'react';
 import { adminSettingsService, StoreSettings, ShippingMethod, PaymentProviderStatus } from '@/lib/settings-service';
 import { INDIAN_STATES } from '@/lib/india';
+import { useAdmin } from '@/lib/admin-context';
+import { ADMIN_ROLES, ROLE_LABELS, AdminRole } from '@/lib/permissions';
+import { adminManagementService, AdminListItem, AdminAuditLogEntry } from '@/lib/admin-management-service';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
-
-export default function SettingsPage() {
+function SettingsPageInner() {
+  const { admin: currentAdmin } = useAdmin();
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'regional' | 'shipping' | 'tax' | 'payment' | 'checkout' | 'notifications' | 'security'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'regional' | 'shipping' | 'tax' | 'payment' | 'checkout' | 'notifications' | 'admins' | 'security'>('general');
   const [formData, setFormData] = useState<Partial<StoreSettings>>({});
   const [shippingMethods, setShippingMethods] = useState<ShippingMethod[]>([]);
   const [providerStatus, setProviderStatus] = useState<PaymentProviderStatus | null>(null);
   const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState('');
+
+  // Administrator management (Administrators tab)
+  const [admins, setAdmins] = useState<AdminListItem[]>([]);
+  const [isLoadingAdmins, setIsLoadingAdmins] = useState(false);
+  const [adminActionId, setAdminActionId] = useState<string | null>(null);
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [newAdminFirstName, setNewAdminFirstName] = useState('');
+  const [newAdminRole, setNewAdminRole] = useState<AdminRole>('ORDER_MANAGER');
   const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
   const [adminCreateMessage, setAdminCreateMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [activityForId, setActivityForId] = useState<string | null>(null);
+  const [activityEntries, setActivityEntries] = useState<AdminAuditLogEntry[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(false);
+
+  const getToken = () => localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken') || '';
+
+  const loadAdmins = async () => {
+    setIsLoadingAdmins(true);
+    try {
+      const result = await adminManagementService.list(getToken());
+      setAdmins(result);
+    } catch (err) {
+      setAdminCreateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to load administrators' });
+    } finally {
+      setIsLoadingAdmins(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'admins' && admins.length === 0 && !isLoadingAdmins) {
+      loadAdmins();
+    }
+  }, [activeTab]);
 
   const handleCreateAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,22 +67,67 @@ export default function SettingsPage() {
     }
     setIsCreatingAdmin(true);
     try {
-      const token = localStorage.getItem('adminSessionToken');
-      const response = await fetch(`${API_BASE}/api/auth/admin/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ email: newAdminEmail, password: newAdminPassword, firstName: newAdminFirstName }),
+      const result = await adminManagementService.createAdmin(getToken(), {
+        email: newAdminEmail,
+        password: newAdminPassword,
+        firstName: newAdminFirstName,
+        adminRole: newAdminRole,
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Failed to create administrator');
-      setAdminCreateMessage({ type: 'success', text: `Administrator ${data.user.email} created successfully` });
+      setAdminCreateMessage({ type: 'success', text: `Administrator ${result.user.email} created successfully` });
       setNewAdminEmail('');
       setNewAdminPassword('');
       setNewAdminFirstName('');
+      setNewAdminRole('ORDER_MANAGER');
+      await loadAdmins();
     } catch (err) {
       setAdminCreateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create administrator' });
     } finally {
       setIsCreatingAdmin(false);
+    }
+  };
+
+  const handleChangeRole = async (id: string, role: AdminRole) => {
+    setAdminActionId(id);
+    setAdminCreateMessage(null);
+    try {
+      await adminManagementService.changeRole(getToken(), id, role);
+      await loadAdmins();
+    } catch (err) {
+      setAdminCreateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to change role' });
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
+  const handleToggleStatus = async (admin: AdminListItem) => {
+    const nextActive = !admin.isActive;
+    if (!confirm(`${nextActive ? 'Reactivate' : 'Deactivate'} ${admin.email}?`)) return;
+    setAdminActionId(admin.id);
+    setAdminCreateMessage(null);
+    try {
+      await adminManagementService.setStatus(getToken(), admin.id, nextActive);
+      await loadAdmins();
+    } catch (err) {
+      setAdminCreateMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update status' });
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
+  const handleViewActivity = async (id: string) => {
+    if (activityForId === id) {
+      setActivityForId(null);
+      return;
+    }
+    setActivityForId(id);
+    setIsLoadingActivity(true);
+    try {
+      const result = await adminManagementService.getActivity(getToken(), id);
+      setActivityEntries(result.data);
+    } catch {
+      setActivityEntries([]);
+    } finally {
+      setIsLoadingActivity(false);
     }
   };
 
@@ -174,6 +251,7 @@ export default function SettingsPage() {
               { id: 'payment', label: 'Payment Settings' },
               { id: 'checkout', label: 'Checkout' },
               { id: 'notifications', label: 'Notifications' },
+              { id: 'admins', label: 'Administrators' },
               { id: 'security', label: 'Security' },
             ].map((tab) => (
               <button
@@ -639,9 +717,34 @@ export default function SettingsPage() {
               </div>
 
               <div className="border-t border-gray-light pt-6 mt-6">
+                <h3 className="text-sm font-medium text-black mb-1">Administrator Accounts</h3>
+                <p className="text-xs text-gray-medium">
+                  Creating staff accounts, assigning roles, and activity history have moved to the{' '}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('admins')}
+                    className="text-black underline font-medium"
+                  >
+                    Administrators
+                  </button>{' '}
+                  tab.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Administrators Tab */}
+          {activeTab === 'admins' && (
+            <div className="p-6 space-y-6">
+              <div className="bg-blue-50 border border-blue-200 rounded p-4 text-sm text-blue-900">
+                Only Super Admins can create staff accounts, change roles, or activate/deactivate administrators.
+                Granting Super Admin access is restricted to existing Super Admins.
+              </div>
+
+              <div>
                 <h3 className="text-sm font-medium text-black mb-1">Add Administrator</h3>
                 <p className="text-xs text-gray-medium mb-4">
-                  Create another administrator account. They will have full access to this admin panel.
+                  Create a staff account with a specific role. They will only have access to the sections their role permits.
                 </p>
 
                 {adminCreateMessage && (
@@ -656,7 +759,7 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                <form onSubmit={handleCreateAdmin} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <form onSubmit={handleCreateAdmin} className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <input
                     type="text"
                     placeholder="First name"
@@ -682,14 +785,106 @@ export default function SettingsPage() {
                     className="px-3 py-2 border border-gray-light rounded text-sm"
                     required
                   />
+                  <select
+                    value={newAdminRole}
+                    onChange={(e) => setNewAdminRole(e.target.value as AdminRole)}
+                    className="px-3 py-2 border border-gray-light rounded text-sm"
+                  >
+                    {ADMIN_ROLES.map((role) => (
+                      <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+                    ))}
+                  </select>
                   <button
                     type="submit"
                     disabled={isCreatingAdmin}
-                    className="md:col-span-3 px-4 py-2 bg-black text-cream rounded hover:bg-gray-dark disabled:opacity-50 transition-colors text-sm font-medium"
+                    className="md:col-span-4 px-4 py-2 bg-black text-cream rounded hover:bg-gray-dark disabled:opacity-50 transition-colors text-sm font-medium"
                   >
                     {isCreatingAdmin ? 'Creating...' : 'Create Administrator'}
                   </button>
                 </form>
+              </div>
+
+              <div className="border-t border-gray-light pt-6">
+                <h3 className="text-sm font-medium text-black mb-4">All Administrators</h3>
+                {isLoadingAdmins ? (
+                  <p className="text-sm text-gray-medium">Loading...</p>
+                ) : admins.length === 0 ? (
+                  <p className="text-sm text-gray-medium">No administrators found.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {admins.map((a) => (
+                      <div key={a.id} className="border border-gray-light rounded-lg p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-black">
+                              {a.firstName || a.email} {a.lastName || ''}
+                              {a.id === currentAdmin?.id && <span className="text-xs text-gray-medium"> (you)</span>}
+                            </p>
+                            <p className="text-xs text-gray-medium">{a.email}</p>
+                            <p className="text-xs text-gray-medium">
+                              {a.isActive ? (
+                                <span className="text-green-700 font-medium">Active</span>
+                              ) : (
+                                <span className="text-red-600 font-medium">Deactivated</span>
+                              )}
+                              {a.lastLogin && ` · Last login ${new Date(a.lastLogin).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={a.adminRole || ''}
+                              onChange={(e) => handleChangeRole(a.id, e.target.value as AdminRole)}
+                              disabled={adminActionId === a.id}
+                              className="px-3 py-2 border border-gray-light rounded text-sm disabled:opacity-50"
+                            >
+                              {ADMIN_ROLES.map((role) => (
+                                <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => handleToggleStatus(a)}
+                              disabled={adminActionId === a.id || a.id === currentAdmin?.id}
+                              title={a.id === currentAdmin?.id ? 'You cannot deactivate your own account' : ''}
+                              className={`px-3 py-2 rounded text-sm font-medium border disabled:opacity-50 disabled:cursor-not-allowed ${
+                                a.isActive
+                                  ? 'border-red-300 text-red-600 hover:bg-red-50'
+                                  : 'border-green-300 text-green-700 hover:bg-green-50'
+                              }`}
+                            >
+                              {a.isActive ? 'Deactivate' : 'Reactivate'}
+                            </button>
+                            <button
+                              onClick={() => handleViewActivity(a.id)}
+                              className="px-3 py-2 rounded text-sm font-medium border border-gray-light text-black hover:border-black"
+                            >
+                              {activityForId === a.id ? 'Hide Activity' : 'View Activity'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {activityForId === a.id && (
+                          <div className="mt-4 border-t border-gray-light pt-4">
+                            {isLoadingActivity ? (
+                              <p className="text-xs text-gray-medium">Loading activity...</p>
+                            ) : activityEntries.length === 0 ? (
+                              <p className="text-xs text-gray-medium">No recorded actions for this administrator.</p>
+                            ) : (
+                              <ul className="space-y-2">
+                                {activityEntries.map((entry) => (
+                                  <li key={entry.id} className="text-xs text-gray-dark">
+                                    <span className="font-medium">{entry.action}</span>
+                                    {' · '}
+                                    {new Date(entry.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -717,5 +912,13 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <RequirePermission permission="settings:view">
+      <SettingsPageInner />
+    </RequirePermission>
   );
 }

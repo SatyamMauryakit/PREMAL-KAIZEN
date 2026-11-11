@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RazorpayService } from './razorpay.service';
-import { EmailService } from '../email/email.service';
+import { NotificationService } from '../notifications/notification.service';
+import { InvoicesService } from '../invoices/invoices.service';
+import { buildOrderPayload } from '../notifications/order-payload';
 
 @Injectable()
 export class PaymentsService {
@@ -10,8 +12,9 @@ export class PaymentsService {
   constructor(
     private prisma: PrismaService,
     private razorpayService: RazorpayService,
-    private emailService: EmailService,
-  ) {}
+    private notificationService: NotificationService,
+    private invoicesService: InvoicesService,
+  ) { }
 
   /**
    * Verifies a Razorpay Checkout success callback. This is the fast path for
@@ -69,21 +72,33 @@ export class PaymentsService {
       throw new BadRequestException(`Payment is not yet completed (status: ${payment.status})`);
     }
 
-    // Conditional update: only the first caller to reach here with paymentVerifiedAt
-    // still null wins - guards against a race between this call and a concurrent webhook.
-    const result = await this.prisma.order.updateMany({
-      where: { id: order.id, paymentVerifiedAt: null },
-      data: {
-        paymentStatus: 'completed',
-        razorpayPaymentId: data.razorpay_payment_id,
-        razorpaySignature: data.razorpay_signature,
-        paymentVerifiedAt: new Date(),
-      },
+    // Conditional update + invoice + notification in one transaction: only the first
+    // caller (this path vs. a concurrent webhook) with paymentVerifiedAt still null
+    // wins, and the invoice + confirmation event are committed atomically with the
+    // payment status so a crash can't leave a paid order without its invoice/email.
+    const full = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: { items: { include: { product: true } }, address: true, user: true },
     });
+    const eventPayload = full ? buildOrderPayload(full) : null;
+    if (eventPayload) eventPayload.paymentStatus = 'completed';
 
-    if (result.count > 0) {
-      await this.sendPaymentConfirmationEmailOnce(order.id);
-    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      const r = await tx.order.updateMany({
+        where: { id: order.id, paymentVerifiedAt: null },
+        data: {
+          paymentStatus: 'completed',
+          razorpayPaymentId: data.razorpay_payment_id,
+          razorpaySignature: data.razorpay_signature,
+          paymentVerifiedAt: new Date(),
+        },
+      });
+      if (r.count > 0 && eventPayload) {
+        await this.invoicesService.ensureInvoice(order.id, { tx });
+        await this.notificationService.enqueue(order.id, 'payment_captured', eventPayload, { tx });
+      }
+      return r;
+    });
 
     return { success: true, orderId: order.id, orderNumber: order.orderNumber };
   }
@@ -141,17 +156,26 @@ export class PaymentsService {
         const amountMatches = Number(paymentEntity.amount) === order.total;
         const currencyMatches = paymentEntity.currency === 'INR';
         if (amountMatches && currencyMatches) {
-          const result = await this.prisma.order.updateMany({
-            where: { id: order.id, paymentVerifiedAt: null },
-            data: {
-              paymentStatus: 'completed',
-              razorpayPaymentId: paymentEntity.id,
-              paymentVerifiedAt: new Date(),
-            },
+          const full = await this.prisma.order.findUnique({
+            where: { id: order.id },
+            include: { items: { include: { product: true } }, address: true, user: true },
           });
-          if (result.count > 0) {
-            await this.sendPaymentConfirmationEmailOnce(order.id);
-          }
+          const eventPayload = full ? buildOrderPayload(full) : null;
+          if (eventPayload) eventPayload.paymentStatus = 'completed';
+          await this.prisma.$transaction(async (tx) => {
+            const r = await tx.order.updateMany({
+              where: { id: order.id, paymentVerifiedAt: null },
+              data: {
+                paymentStatus: 'completed',
+                razorpayPaymentId: paymentEntity.id,
+                paymentVerifiedAt: new Date(),
+              },
+            });
+            if (r.count > 0 && eventPayload) {
+              await this.invoicesService.ensureInvoice(order.id, { tx });
+              await this.notificationService.enqueue(order.id, 'payment_captured', eventPayload, { tx });
+            }
+          });
         } else {
           this.logger.error(
             `Webhook amount/currency mismatch for order ${order.id}: expected ${order.total} INR, got ${paymentEntity.amount} ${paymentEntity.currency}`,
@@ -160,65 +184,21 @@ export class PaymentsService {
       }
     } else if (eventType === 'payment.failed') {
       if (order.paymentStatus === 'pending') {
-        await this.prisma.order.update({ where: { id: order.id }, data: { paymentStatus: 'failed' } });
-        await this.sendPaymentFailedEmailOnce(order.id);
+        const full = await this.prisma.order.findUnique({
+          where: { id: order.id },
+          include: { items: { include: { product: true } }, address: true, user: true },
+        });
+        const eventPayload = full ? buildOrderPayload(full) : null;
+        if (eventPayload) eventPayload.paymentStatus = 'failed';
+        await this.prisma.$transaction(async (tx) => {
+          await tx.order.update({ where: { id: order.id }, data: { paymentStatus: 'failed' } });
+          if (eventPayload) {
+            await this.notificationService.enqueue(order.id, 'payment_failed', eventPayload, { tx });
+          }
+        });
       }
     }
 
     return { status: 'processed' };
-  }
-
-  private async loadOrderForEmail(orderId: string) {
-    return this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: { include: { product: true } }, user: true, address: true },
-    });
-  }
-
-  private async sendPaymentConfirmationEmailOnce(orderId: string): Promise<void> {
-    const order = await this.loadOrderForEmail(orderId);
-    if (!order || order.paymentEmailSentAt) return;
-
-    const sent = await this.emailService.sendPaymentConfirmationEmail({
-      toEmail: order.user.email,
-      customerName: order.user.firstName || order.user.email,
-      orderNumber: order.orderNumber,
-      orderId: order.id,
-      paymentMethod: order.paymentMethod,
-      paymentStatus: order.paymentStatus,
-      total: order.total,
-      items: order.items.map((i) => ({
-        name: i.product?.name || 'Product',
-        quantity: i.quantity,
-        price: i.price,
-        selectedSize: i.selectedSize,
-        selectedColor: i.selectedColor,
-      })),
-      shippingSummary: order.address ? `${order.address.city}, ${order.address.state} ${order.address.postalCode}` : undefined,
-    });
-
-    if (sent) {
-      await this.prisma.order.update({ where: { id: order.id }, data: { paymentEmailSentAt: new Date() } });
-    }
-  }
-
-  private async sendPaymentFailedEmailOnce(orderId: string): Promise<void> {
-    const order = await this.loadOrderForEmail(orderId);
-    if (!order || order.paymentFailedEmailSentAt) return;
-
-    const sent = await this.emailService.sendPaymentFailedEmail({
-      toEmail: order.user.email,
-      customerName: order.user.firstName || order.user.email,
-      orderNumber: order.orderNumber,
-      orderId: order.id,
-      paymentMethod: order.paymentMethod,
-      paymentStatus: order.paymentStatus,
-      total: order.total,
-      items: [],
-    });
-
-    if (sent) {
-      await this.prisma.order.update({ where: { id: order.id }, data: { paymentFailedEmailSentAt: new Date() } });
-    }
   }
 }

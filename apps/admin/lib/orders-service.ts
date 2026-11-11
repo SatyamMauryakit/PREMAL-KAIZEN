@@ -165,4 +165,26 @@ export const adminOrdersService = {
     }
     return response.json();
   },
+
+  /** Generate/ensure an invoice exists for an order (idempotent). */
+  async generateInvoice(id: string, token: string): Promise<{ invoiceNumber: string }> {
+    const response = await fetch(`${API_BASE}/api/orders/${id}/invoice/generate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to generate invoice');
+    }
+    return response.json();
+  },
+
+  /** Returns a Blob for the invoice PDF so the admin can download it. */
+  async downloadInvoicePdf(id: string, token: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE}/api/orders/${id}/invoice/pdf`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error('Invoice not available');
+    return response.blob();
+  },
 };

@@ -5,9 +5,11 @@ import { CartProvider } from '@/lib/cart-context';
 import { WishlistProvider } from '@/lib/wishlist-context';
 import { AuthProvider } from '@/lib/auth-context';
 import { CheckoutProvider } from '@/lib/checkout-context';
+import { SITE_URL } from '@/lib/metadata';
 import './globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: 'PREMAL KAIZEN | Premium Streetwear',
   description: 'Wear Your Vibe. Own Your Story. Premium streetwear crafted for the modern explorer.',
   keywords: ['streetwear', 'fashion', 'premium', 'clothing'],
