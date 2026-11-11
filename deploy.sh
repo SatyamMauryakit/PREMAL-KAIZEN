@@ -262,11 +262,19 @@ for key in "${ALL_EXPECTED_KEYS[@]}"; do
   fi
 done
 
+# RAZORPAY_CONFIGURED tracks only KEY_ID/KEY_SECRET - the pair actually required for
+# the browser-callback checkout flow (RazorpayService.verifyPaymentSignature uses
+# KEY_SECRET, never the webhook secret). RAZORPAY_WEBHOOK_SECRET is tracked separately:
+# it only gates the independent async webhook endpoint, and leaving it unset does not
+# disable checkout itself - conflating the two previously made this script report
+# "Razorpay: DISABLED" even when checkout was fully configured and working.
 RAZORPAY_CONFIGURED=1
+RAZORPAY_WEBHOOK_CONFIGURED=1
 SMTP_CONFIGURED=1
-for key in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET; do
+for key in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET; do
   for p in "${STILL_PLACEHOLDER[@]:-}"; do [ "$p" = "$key" ] && RAZORPAY_CONFIGURED=0; done
 done
+for p in "${STILL_PLACEHOLDER[@]:-}"; do [ "$p" = "RAZORPAY_WEBHOOK_SECRET" ] && RAZORPAY_WEBHOOK_CONFIGURED=0; done
 for key in SMTP_HOST SMTP_USER SMTP_PASSWORD EMAIL_FROM; do
   for p in "${STILL_PLACEHOLDER[@]:-}"; do [ "$p" = "$key" ] && SMTP_CONFIGURED=0; done
 done
@@ -279,6 +287,9 @@ if [ "${#STILL_PLACEHOLDER[@]}" -gt 0 ]; then
        "(the real admin account is created via the self-disabling /api/auth/admin/bootstrap" \
        "endpoint instead - see PRODUCTION_SECURITY_CHECKLIST.md)"
   [ "$RAZORPAY_CONFIGURED" -eq 0 ] && warn "  - Razorpay: DISABLED until set - payments will not function"
+  [ "$RAZORPAY_CONFIGURED" -eq 1 ] && [ "$RAZORPAY_WEBHOOK_CONFIGURED" -eq 0 ] && \
+    warn "  - Razorpay webhook: unset - checkout itself still works (browser-callback" \
+         "verification doesn't need it), but the async webhook endpoint can't verify signatures"
   [ "$SMTP_CONFIGURED" -eq 0 ] && warn "  - SMTP: DISABLED until set - transactional emails will not send"
 else
   ok "All expected secret keys are set to non-placeholder values"
@@ -407,6 +418,17 @@ kubectl apply -f deploy/k8s/00-namespace.yaml
 
 VALIDATION_FAILED=0
 for f in deploy/k8s/*.yaml; do
+  # The migration Job is deliberately excluded here: Kubernetes Jobs are immutable
+  # once created (spec.template cannot be patched in place), so `apply --dry-run=server`
+  # against a cluster that already ran this Job once (e.g. a prior successful deploy)
+  # always fails with "field is immutable" - not a real manifest problem, just Jobs'
+  # own API semantics. Stage 6 already owns this manifest's full correct lifecycle
+  # (explicit delete-then-apply, never a patch) and validates it for real there - a
+  # second, generic dry-run here would make every rerun after the first successful
+  # deploy fail, defeating the "safe to rerun" guarantee this script exists to provide.
+  if [[ "$f" == *09-migration-job.yaml ]]; then
+    continue
+  fi
   if ! kubectl apply --dry-run=server --validate=true -f "$f" >/tmp/premal-manifest-check.log 2>&1; then
     fail "Manifest failed validation: $f"
     cat /tmp/premal-manifest-check.log
