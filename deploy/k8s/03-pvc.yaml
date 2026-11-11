@@ -15,6 +15,22 @@
 # This PVC is intentionally ReadWriteOnce and the api Deployment is intentionally
 # replicas: 1 (see that file's comment) - SQLite does not support safe concurrent
 # writers across processes, so this is a hard constraint, not a missed optimization.
+#
+# The `premal-local` StorageClass below is REQUIRED - without it, the PV/PVC's
+# `storageClassName: premal-local` reference resolves to nothing and the API server
+# logs "storageclass.storage.k8s.io \"premal-local\" not found" (observed in a real
+# deployment). This is intentionally NOT a dynamic provisioner - `no-provisioner` plus
+# `WaitForFirstConsumer` is the standard pattern for a manually pre-created, static
+# PV like the one below: it declares the class so the name resolves cleanly, without
+# ever auto-creating storage on its own (which would bypass the real EC2-host-mounted
+# hostPath this deployment depends on for persistence surviving `kind delete cluster`).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: premal-local
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:

@@ -79,3 +79,12 @@ deploy/.rendered/
 # apps/api/prisma/migrations/ - schema-only, no secrets, just not meant to be committed
 # again from the repo root.
 razorpay_migration.sql
+
+# Private keys and certificates - never commit these, regardless of where they
+# appear in the tree (e.g. a TLS cert/key pair dropped in for local Nginx testing).
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
