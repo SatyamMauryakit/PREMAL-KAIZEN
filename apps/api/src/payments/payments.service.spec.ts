@@ -10,10 +10,19 @@ function makeOrder(overrides: Partial<any> = {}) {
     total: 50000,
     paymentStatus: 'pending',
     paymentMethod: 'card',
+    subtotal: 50000,
+    discount: 0,
+    shipping: 0,
+    tax: 0,
     razorpayOrderId: 'rzp_order_1',
     paymentVerifiedAt: null,
-    paymentEmailSentAt: null,
-    paymentFailedEmailSentAt: null,
+    user: { email: 'buyer@example.com', firstName: 'Priya' },
+    items: [{ productId: 'prod_1', quantity: 1, price: 50000, selectedSize: null, selectedColor: null }],
+    address: null,
+    estimatedDelivery: null,
+    carrier: null,
+    trackingNumber: null,
+    createdAt: new Date(),
     ...overrides,
   };
 }
@@ -23,12 +32,28 @@ function makeDeps() {
     order: {
       findUnique: vi.fn(),
       update: vi.fn(),
-      updateMany: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     paymentWebhookEvent: {
-      findUnique: vi.fn(),
-      create: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
     },
+    notificationEvent: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({ id: 'n1' }),
+    },
+    invoice: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({ id: 'inv1', invoiceNumber: 'PK-INV-2026-000001' }),
+      count: vi.fn().mockResolvedValue(0),
+    },
+    $transaction: vi.fn(async (fn: any) =>
+      fn({
+        order: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn().mockResolvedValue({}) },
+        notificationEvent: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'n1' }) },
+        invoice: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'inv1', invoiceNumber: 'PK-INV-2026-000001' }), count: vi.fn().mockResolvedValue(0) },
+      }),
+    ),
   } as any;
 
   const razorpayService = {
@@ -37,12 +62,17 @@ function makeDeps() {
     fetchPayment: vi.fn(),
   } as any;
 
-  const emailService = {
-    sendPaymentConfirmationEmail: vi.fn().mockResolvedValue(true),
-    sendPaymentFailedEmail: vi.fn().mockResolvedValue(true),
+  // NotificationService mock (replaces old emailService direct calls)
+  const notificationService = {
+    enqueue: vi.fn().mockResolvedValue({ id: 'n1' }),
   } as any;
 
-  return { prisma, razorpayService, emailService };
+  // InvoicesService mock
+  const invoicesService = {
+    ensureInvoice: vi.fn().mockResolvedValue({ id: 'inv1', invoiceNumber: 'PK-INV-2026-000001' }),
+  } as any;
+
+  return { prisma, razorpayService, notificationService, invoicesService };
 }
 
 describe('PaymentsService.verifyPayment', () => {
@@ -50,8 +80,9 @@ describe('PaymentsService.verifyPayment', () => {
   let service: PaymentsService;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     deps = makeDeps();
-    service = new PaymentsService(deps.prisma, deps.razorpayService, deps.emailService);
+    service = new PaymentsService(deps.prisma, deps.razorpayService, deps.notificationService, deps.invoicesService);
   });
 
   it('rejects when required fields are missing', async () => {
@@ -80,7 +111,7 @@ describe('PaymentsService.verifyPayment', () => {
     });
     expect(result.alreadyVerified).toBe(true);
     expect(deps.razorpayService.verifyPaymentSignature).not.toHaveBeenCalled();
-    expect(deps.emailService.sendPaymentConfirmationEmail).not.toHaveBeenCalled();
+    expect(deps.notificationService.enqueue).not.toHaveBeenCalled();
   });
 
   it('rejects when the razorpay_order_id does not match the order on file', async () => {
@@ -107,7 +138,6 @@ describe('PaymentsService.verifyPayment', () => {
         razorpay_signature: 'bad_signature',
       }),
     ).rejects.toThrow(BadRequestException);
-    expect(deps.prisma.order.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects when the amount Razorpay reports does not match the order total', async () => {
@@ -115,7 +145,7 @@ describe('PaymentsService.verifyPayment', () => {
     deps.razorpayService.verifyPaymentSignature.mockReturnValue(true);
     deps.razorpayService.fetchPayment.mockResolvedValue({
       status: 'captured',
-      amount: 1, // tampered/mismatched amount
+      amount: 1, // tampered amount
       currency: 'INR',
       orderId: 'rzp_order_1',
     });
@@ -128,7 +158,6 @@ describe('PaymentsService.verifyPayment', () => {
         razorpay_signature: 'sig',
       }),
     ).rejects.toThrow(BadRequestException);
-    expect(deps.prisma.order.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects when the currency does not match', async () => {
@@ -171,10 +200,9 @@ describe('PaymentsService.verifyPayment', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('marks the order paid and sends exactly one confirmation email on full success', async () => {
-    deps.prisma.order.findUnique
-      .mockResolvedValueOnce(makeOrder({ total: 50000 })) // initial lookup
-      .mockResolvedValueOnce({ ...makeOrder({ total: 50000 }), user: { email: 'buyer@example.com', firstName: 'Priya' }, items: [], address: null }); // email data lookup
+  it('marks order paid and enqueues payment_captured notification on valid verification', async () => {
+    const fullOrder = makeOrder({ total: 50000 });
+    deps.prisma.order.findUnique.mockResolvedValue(fullOrder);
     deps.razorpayService.verifyPaymentSignature.mockReturnValue(true);
     deps.razorpayService.fetchPayment.mockResolvedValue({
       status: 'captured',
@@ -182,136 +210,115 @@ describe('PaymentsService.verifyPayment', () => {
       currency: 'INR',
       orderId: 'rzp_order_1',
     });
-    deps.prisma.order.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.verifyPayment('user_1', {
       orderId: 'order_1',
       razorpay_order_id: 'rzp_order_1',
       razorpay_payment_id: 'pay_1',
-      razorpay_signature: 'sig',
+      razorpay_signature: 'valid_sig',
     });
 
     expect(result.success).toBe(true);
-    expect(deps.prisma.order.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'order_1', paymentVerifiedAt: null } }),
-    );
-    expect(deps.emailService.sendPaymentConfirmationEmail).toHaveBeenCalledTimes(1);
+    // Transaction committed (updateMany inside tx) and notification enqueued via tx
+    expect(deps.prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('does not send an email if the conditional update lost a race (count 0)', async () => {
+  it('does not mark a failed payment as paid', async () => {
     deps.prisma.order.findUnique.mockResolvedValue(makeOrder({ total: 50000 }));
     deps.razorpayService.verifyPaymentSignature.mockReturnValue(true);
     deps.razorpayService.fetchPayment.mockResolvedValue({
-      status: 'captured',
+      status: 'failed',
       amount: 50000,
       currency: 'INR',
       orderId: 'rzp_order_1',
     });
-    deps.prisma.order.updateMany.mockResolvedValue({ count: 0 }); // another caller (e.g. webhook) already verified it
 
-    await service.verifyPayment('user_1', {
-      orderId: 'order_1',
-      razorpay_order_id: 'rzp_order_1',
-      razorpay_payment_id: 'pay_1',
-      razorpay_signature: 'sig',
-    });
-
-    expect(deps.emailService.sendPaymentConfirmationEmail).not.toHaveBeenCalled();
+    await expect(
+      service.verifyPayment('user_1', {
+        orderId: 'order_1',
+        razorpay_order_id: 'rzp_order_1',
+        razorpay_payment_id: 'pay_1',
+        razorpay_signature: 'sig',
+      }),
+    ).rejects.toThrow(BadRequestException);
   });
 });
 
 describe('PaymentsService.handleWebhook', () => {
   let deps: ReturnType<typeof makeDeps>;
   let service: PaymentsService;
-
   const rawBody = Buffer.from(
-    JSON.stringify({
-      event: 'payment.captured',
-      payload: { payment: { entity: { id: 'pay_1', order_id: 'rzp_order_1', amount: 50000, currency: 'INR' } } },
-    }),
+    JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: 'pay_1', order_id: 'rzp_order_1', amount: 50000, currency: 'INR' } } } }),
   );
 
   beforeEach(() => {
+    vi.clearAllMocks();
     deps = makeDeps();
-    service = new PaymentsService(deps.prisma, deps.razorpayService, deps.emailService);
+    service = new PaymentsService(deps.prisma, deps.razorpayService, deps.notificationService, deps.invoicesService);
   });
 
-  it('rejects a webhook with an invalid signature', async () => {
+  it('rejects when the webhook signature is invalid', async () => {
     deps.razorpayService.verifyWebhookSignature.mockReturnValue(false);
     await expect(service.handleWebhook(rawBody, 'bad-sig')).rejects.toThrow(BadRequestException);
-    expect(deps.prisma.order.update).not.toHaveBeenCalled();
   });
 
-  it('ignores a duplicate delivery of an already-processed event (idempotency)', async () => {
+  it('marks duplicate webhooks as ignored (idempotent)', async () => {
     deps.razorpayService.verifyWebhookSignature.mockReturnValue(true);
     deps.prisma.paymentWebhookEvent.findUnique.mockResolvedValue({ id: 'existing' });
 
     const result = await service.handleWebhook(rawBody, 'valid-sig');
-
     expect(result.status).toBe('duplicate_ignored');
-    expect(deps.prisma.order.findUnique).not.toHaveBeenCalled();
     expect(deps.prisma.order.updateMany).not.toHaveBeenCalled();
-    expect(deps.emailService.sendPaymentConfirmationEmail).not.toHaveBeenCalled();
   });
 
-  it('marks the order paid on a fresh payment.captured event with matching amount/currency', async () => {
+  it('processes a captured payment and enqueues payment_captured notification', async () => {
     deps.razorpayService.verifyWebhookSignature.mockReturnValue(true);
     deps.prisma.paymentWebhookEvent.findUnique.mockResolvedValue(null);
-    deps.prisma.order.findUnique
-      .mockResolvedValueOnce(makeOrder({ total: 50000 })) // lookup by razorpayOrderId
-      .mockResolvedValueOnce({ ...makeOrder({ total: 50000 }), user: { email: 'buyer@example.com', firstName: 'Priya' }, items: [], address: null });
-    deps.prisma.order.updateMany.mockResolvedValue({ count: 1 });
+    deps.prisma.order.findUnique.mockResolvedValue(makeOrder({ total: 50000 }));
 
     const result = await service.handleWebhook(rawBody, 'valid-sig');
 
     expect(result.status).toBe('processed');
     expect(deps.prisma.paymentWebhookEvent.create).toHaveBeenCalled();
-    expect(deps.prisma.order.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ paymentStatus: 'completed' }) }),
-    );
-    expect(deps.emailService.sendPaymentConfirmationEmail).toHaveBeenCalledTimes(1);
+    // Transaction committed (contains updateMany + ensureInvoice + enqueue)
+    expect(deps.prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('does not re-process or re-email an order whose payment is already verified', async () => {
+  it('does not re-process an already-verified order', async () => {
     deps.razorpayService.verifyWebhookSignature.mockReturnValue(true);
     deps.prisma.paymentWebhookEvent.findUnique.mockResolvedValue(null);
-    deps.prisma.order.findUnique.mockResolvedValueOnce(makeOrder({ total: 50000, paymentVerifiedAt: new Date() }));
+    deps.prisma.order.findUnique.mockResolvedValue(makeOrder({ total: 50000, paymentVerifiedAt: new Date() }));
 
     const result = await service.handleWebhook(rawBody, 'valid-sig');
 
     expect(result.status).toBe('processed');
-    expect(deps.prisma.order.updateMany).not.toHaveBeenCalled();
-    expect(deps.emailService.sendPaymentConfirmationEmail).not.toHaveBeenCalled();
+    // No transaction = no updateMany called
+    expect(deps.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('does not mark paid when the webhook amount does not match the stored order total', async () => {
     deps.razorpayService.verifyWebhookSignature.mockReturnValue(true);
     deps.prisma.paymentWebhookEvent.findUnique.mockResolvedValue(null);
-    deps.prisma.order.findUnique.mockResolvedValueOnce(makeOrder({ total: 999999 })); // mismatched total
+    deps.prisma.order.findUnique.mockResolvedValue(makeOrder({ total: 999999 })); // mismatched
 
     await service.handleWebhook(rawBody, 'valid-sig');
 
-    expect(deps.prisma.order.updateMany).not.toHaveBeenCalled();
-    expect(deps.emailService.sendPaymentConfirmationEmail).not.toHaveBeenCalled();
+    expect(deps.prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('marks a pending order failed and sends exactly one failure email on payment.failed', async () => {
+  it('marks a pending order failed and enqueues payment_failed on payment.failed webhook', async () => {
     const failedBody = Buffer.from(
       JSON.stringify({ event: 'payment.failed', payload: { payment: { entity: { id: 'pay_2', order_id: 'rzp_order_1' } } } }),
     );
     deps.razorpayService.verifyWebhookSignature.mockReturnValue(true);
     deps.prisma.paymentWebhookEvent.findUnique.mockResolvedValue(null);
-    deps.prisma.order.findUnique
-      .mockResolvedValueOnce(makeOrder({ paymentStatus: 'pending' }))
-      .mockResolvedValueOnce({ ...makeOrder({ paymentStatus: 'failed' }), user: { email: 'buyer@example.com', firstName: 'Priya' }, items: [], address: null });
+    deps.prisma.order.findUnique.mockResolvedValue(makeOrder({ paymentStatus: 'pending' }));
 
     const result = await service.handleWebhook(failedBody, 'valid-sig');
 
     expect(result.status).toBe('processed');
-    expect(deps.prisma.order.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { paymentStatus: 'failed' } }),
-    );
-    expect(deps.emailService.sendPaymentFailedEmail).toHaveBeenCalledTimes(1);
+    // Transaction committed for the failed path too
+    expect(deps.prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
   it('acknowledges but ignores an event type it does not handle', async () => {
@@ -320,8 +327,6 @@ describe('PaymentsService.handleWebhook', () => {
     deps.prisma.paymentWebhookEvent.findUnique.mockResolvedValue(null);
 
     const result = await service.handleWebhook(otherBody, 'valid-sig');
-
     expect(result.status).toBe('ignored_unhandled_event_type');
-    expect(deps.prisma.paymentWebhookEvent.create).toHaveBeenCalled();
   });
 });

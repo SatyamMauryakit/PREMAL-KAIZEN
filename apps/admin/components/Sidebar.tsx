@@ -5,29 +5,37 @@ import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Icons } from './Icons';
 import { adminAuthService } from '@/lib/auth-service';
+import { useAdmin } from '@/lib/admin-context';
+import { Permission } from '@/lib/permissions';
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  permission: Permission;
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/admin', icon: Icons.Dashboard },
-  { label: 'Products', href: '/admin/products', icon: Icons.Products },
-  { label: 'Categories', href: '/admin/categories', icon: Icons.Categories },
-  { label: 'Inventory', href: '/admin/inventory', icon: Icons.Inventory },
-  { label: 'Orders', href: '/admin/orders', icon: Icons.Orders },
-  { label: 'Vouchers & Discounts', href: '/admin/promotions', icon: Icons.Voucher },
-  { label: 'Customers', href: '/admin/customers', icon: Icons.Customers },
-  { label: 'Analytics', href: '/admin/analytics', icon: Icons.Analytics },
-  { label: 'Settings', href: '/admin/settings', icon: Icons.Settings },
+  { label: 'Dashboard', href: '/admin', icon: Icons.Dashboard, permission: 'dashboard:view' },
+  { label: 'Products', href: '/admin/products', icon: Icons.Products, permission: 'products:view' },
+  { label: 'Categories', href: '/admin/categories', icon: Icons.Categories, permission: 'categories:manage' },
+  { label: 'Inventory', href: '/admin/inventory', icon: Icons.Inventory, permission: 'inventory:manage' },
+  { label: 'Orders', href: '/admin/orders', icon: Icons.Orders, permission: 'orders:view' },
+  { label: 'Vouchers & Discounts', href: '/admin/promotions', icon: Icons.Voucher, permission: 'promotions:manage' },
+  { label: 'Customers', href: '/admin/customers', icon: Icons.Customers, permission: 'customers:view' },
+  { label: 'Customer Carts', href: '/admin/carts', icon: Icons.Carts, permission: 'customers:view' },
+  { label: 'Enquiries', href: '/admin/enquiries', icon: Icons.Messages, permission: 'enquiries:view' },
+  { label: 'Reviews', href: '/admin/reviews', icon: Icons.Reviews, permission: 'reviews:moderate' },
+  { label: 'Analytics', href: '/admin/analytics', icon: Icons.Analytics, permission: 'analytics:view' },
+  { label: 'Settings', href: '/admin/settings', icon: Icons.Settings, permission: 'settings:view' },
 ];
 
 export const Sidebar: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const { hasPermission } = useAdmin();
+  const visibleNavItems = navItems.filter((item) => hasPermission(item.permission));
 
   const handleLogout = async () => {
     if (confirm('Are you sure you want to logout?')) {
@@ -79,7 +87,7 @@ export const Sidebar: React.FC = () => {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-6 px-3">
         <ul className="space-y-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== '/admin' && pathname.startsWith(item.href));
@@ -117,7 +125,7 @@ export const Sidebar: React.FC = () => {
         <button
           onClick={() => {
             // Open help in new tab or navigate to help page if it exists
-            window.open('mailto:support@premalikaizen.com', '_blank');
+            window.open('mailto:premal.kaizen@gmail.com', '_blank');
           }}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-dark hover:text-black hover:bg-gray-light transition-colors group"
           title={isCollapsed ? 'Help & Support' : undefined}

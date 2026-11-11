@@ -6,6 +6,7 @@ export interface AdminUser {
   firstName: string | null;
   lastName: string | null;
   role: string;
+  adminRole: string | null;
   emailVerified: string | null;
 }
 

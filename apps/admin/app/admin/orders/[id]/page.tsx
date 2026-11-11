@@ -426,6 +426,40 @@ export default function OrderDetailsPage({ params }: PageProps) {
                 </p>
               </div>
             </div>
+
+            {/* Invoice */}
+            <div className="bg-white rounded-lg border border-gray-light p-6">
+              <h3 className="text-sm font-semibold text-black mb-3">Invoice</h3>
+              <div className="space-y-3">
+                <button
+                  onClick={async () => {
+                    const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
+                    if (!token) return;
+                    try {
+                      // Ensure invoice exists first (idempotent)
+                      await adminOrdersService.generateInvoice(order.id, token);
+                      const blob = await adminOrdersService.downloadInvoicePdf(order.id, token);
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `invoice-${order.orderNumber}.pdf`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : 'Could not download invoice');
+                    }
+                  }}
+                  disabled={isSaving}
+                  className="w-full px-4 py-2 bg-black text-white rounded text-sm font-medium hover:bg-gray-900 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Download Invoice PDF
+                </button>
+                <p className="text-xs text-gray-medium">Invoice is generated automatically for paid and COD orders.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

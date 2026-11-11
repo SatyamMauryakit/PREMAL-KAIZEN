@@ -2,6 +2,8 @@ import { Controller, Post, Body, Get, Param, Query, UseGuards } from '@nestjs/co
 import { ContactService, ContactSubmission } from './contact.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 
 @Controller('api/contact')
 export class ContactController {
@@ -14,7 +16,8 @@ export class ContactController {
 
   // Reading submitted messages exposes customer PII (name, email, order number) -
   // admin-only, same as every other customer-data read endpoint.
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('enquiries:view')
   @Get('messages')
   async getMessages(@Query('limit') limit?: string, @Query('offset') offset?: string) {
     return this.contactService.getAllMessages(
@@ -23,7 +26,8 @@ export class ContactController {
     );
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('enquiries:view')
   @Get('messages/email/:email')
   async getMessagesByEmail(@Param('email') email: string) {
     return this.contactService.getMessagesByEmail(email);

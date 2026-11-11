@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { orderService, Order, OrderTimeline } from '@/lib/order-service';
-import { formatPrice } from '@/lib/pricing';
+import { formatPaise } from '@/lib/pricing';
 
 type TrackingMode = 'authenticated' | 'guest' | null;
 
@@ -274,7 +274,7 @@ export default function TrackOrderPage() {
                   <p className="text-xs text-gray-medium uppercase tracking-wide font-medium mb-1">
                     Total
                   </p>
-                  <p className="text-lg font-bold text-black">{formatPrice(order.total)}</p>
+                  <p className="text-lg font-bold text-black">{formatPaise(order.total)}</p>
                 </div>
               </div>
 
@@ -392,7 +392,7 @@ export default function TrackOrderPage() {
                       </p>
                     </div>
                     <p className="font-medium text-black text-right">
-                      {formatPrice(item.price * item.quantity)}
+                      {formatPaise(item.price * item.quantity)}
                     </p>
                   </div>
                 ))}

@@ -52,6 +52,15 @@ apps/api/uploads/*
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
 apps/api/prisma/backups/
+apps/api/prisma/dev_backup_*.db
+/backups/
+
+# One-off local dev scripts never meant to ship with the app (e.g. hardcoded
+# test-only credentials for manually seeding an RBAC test account)
+apps/api/seed-test-admin.js
+
+# Data exports/working files, not application source
+*.xlsx
 
 # Throwaway schemas/generated clients used to test an alternate datasource (e.g. Postgres
 # migration testing) - these must never be committed or relied upon by the real app.

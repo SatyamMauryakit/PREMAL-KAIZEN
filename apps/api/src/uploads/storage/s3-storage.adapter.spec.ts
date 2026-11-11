@@ -39,7 +39,7 @@ describe('S3StorageAdapter', () => {
     expect(command.input.ACL).toBeUndefined(); // bucket stays private; no public-read ACL is ever requested
   });
 
-  it('generates a random key with the original extension preserved, under the configured prefix', async () => {
+  it('generates a random key with the extension derived from the MIME type, under the configured prefix', async () => {
     const adapter = new S3StorageAdapter({ bucket: 'b', region: 'ap-south-1', keyPrefix: 'products/' });
     const result = await adapter.save(makeFile({ originalname: 'x.webp', mimetype: 'image/webp' }), {
       protocol: 'https',
@@ -47,6 +47,16 @@ describe('S3StorageAdapter', () => {
     });
 
     expect(result.key).toMatch(/^products\/[0-9a-f]{32}\.webp$/);
+  });
+
+  it('ignores a spoofed original filename extension, using the MIME type instead (upload bypass regression)', async () => {
+    const adapter = new S3StorageAdapter({ bucket: 'b', region: 'ap-south-1', keyPrefix: '' });
+    const result = await adapter.save(makeFile({ originalname: 'payload.html', mimetype: 'image/png' }), {
+      protocol: 'https',
+      host: 'x',
+    });
+
+    expect(result.key.endsWith('.png')).toBe(true);
   });
 
   it('builds a raw S3 URL when no public base URL (CDN) is configured', async () => {

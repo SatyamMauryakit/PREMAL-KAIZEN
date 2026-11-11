@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminPromotionsService, Promotion } from '@/lib/promotions-service';
@@ -121,6 +122,7 @@ export default function PromotionsPage() {
   };
 
   return (
+    <RequirePermission permission="promotions:manage">
     <div className="min-h-screen bg-gray-light">
       <Header
         title="Vouchers & Discounts"
@@ -302,5 +304,6 @@ export default function PromotionsPage() {
         </div>
       </div>
     </div>
+    </RequirePermission>
   );
 }

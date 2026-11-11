@@ -54,6 +54,7 @@ export class CustomerAdminService {
           phoneNumber: true,
           isActive: true,
           emailVerified: true,
+          phoneVerified: true,
           lastLogin: true,
           createdAt: true,
           updatedAt: true,
@@ -93,6 +94,7 @@ export class CustomerAdminService {
           orderCount: customer._count.orders,
           totalSpent,
           completedOrders,
+          verificationStatus: this.verificationStatus(customer.emailVerified, customer.phoneVerified),
           _count: undefined,
         };
       })
@@ -120,6 +122,7 @@ export class CustomerAdminService {
         phoneNumber: true,
         isActive: true,
         emailVerified: true,
+        phoneVerified: true,
         lastLogin: true,
         createdAt: true,
         updatedAt: true,
@@ -165,6 +168,7 @@ export class CustomerAdminService {
       orderCount: orders.length,
       totalSpent,
       completedOrders,
+      verificationStatus: this.verificationStatus(customer.emailVerified, customer.phoneVerified),
     };
   }
 
@@ -313,12 +317,16 @@ export class CustomerAdminService {
       activeCustomers,
       inactiveCustomers,
       verifiedEmails,
+      verifiedMobiles,
+      fullyVerified,
       totalOrderValue,
     ] = await Promise.all([
       this.prisma.user.count({ where: { role: 'customer' } }),
       this.prisma.user.count({ where: { role: 'customer', isActive: true } }),
       this.prisma.user.count({ where: { role: 'customer', isActive: false } }),
       this.prisma.user.count({ where: { role: 'customer', emailVerified: { not: null } } }),
+      this.prisma.user.count({ where: { role: 'customer', phoneVerified: { not: null } } }),
+      this.prisma.user.count({ where: { role: 'customer', emailVerified: { not: null }, phoneVerified: { not: null } } }),
       this.prisma.order.aggregate({
         _sum: { total: true },
       }),
@@ -329,10 +337,26 @@ export class CustomerAdminService {
       activeCustomers,
       inactiveCustomers,
       verifiedEmails,
+      verifiedMobiles,
+      fullyVerified,
       totalOrderValue: totalOrderValue._sum?.total || 0,
       avgOrderValue:
         totalCustomers > 0 ? Math.round((totalOrderValue._sum?.total || 0) / totalCustomers) : 0,
     };
+  }
+
+  /**
+   * Combined verification status for the admin customer panel: 'Both Verified',
+   * 'Email Verified', 'Mobile Verified', or 'Pending Verification'.
+   */
+  private verificationStatus(
+    emailVerified: Date | null,
+    phoneVerified: Date | null,
+  ): 'both_verified' | 'email_verified' | 'mobile_verified' | 'pending_verification' {
+    if (emailVerified && phoneVerified) return 'both_verified';
+    if (emailVerified) return 'email_verified';
+    if (phoneVerified) return 'mobile_verified';
+    return 'pending_verification';
   }
 
   /**

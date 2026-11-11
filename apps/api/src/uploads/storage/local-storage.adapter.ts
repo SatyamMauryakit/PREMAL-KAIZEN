@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { extname, join } from 'path';
+import { join } from 'path';
 import { promises as fs } from 'fs';
 import * as crypto from 'crypto';
 import { StorageAdapter, StoredFile, UploadRequestContext } from './storage-adapter.interface';
+import { safeExtensionFor } from '../upload-validation';
 
 /**
  * LocalStorageAdapter
@@ -24,7 +25,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async save(file: Express.Multer.File, ctx: UploadRequestContext): Promise<StoredFile> {
-    const filename = `${crypto.randomBytes(16).toString('hex')}${extname(file.originalname)}`;
+    const filename = `${crypto.randomBytes(16).toString('hex')}${safeExtensionFor(file.mimetype)}`;
     await fs.mkdir(this.uploadsDir, { recursive: true });
     await fs.writeFile(join(this.uploadsDir, filename), file.buffer);
 

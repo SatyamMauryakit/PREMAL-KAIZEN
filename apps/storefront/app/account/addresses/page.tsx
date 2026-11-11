@@ -181,7 +181,7 @@ export default function AddressesPage() {
           </h3>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="label" className="block text-sm font-medium text-gray-700 mb-2">
                   Label (Home, Office, etc.)
@@ -216,7 +216,7 @@ export default function AddressesPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-2">
                   Last Name *
@@ -301,7 +301,7 @@ export default function AddressesPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="city" className="block text-sm font-medium text-gray-700 mb-2">
                   City *
@@ -340,7 +340,7 @@ export default function AddressesPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="postalCode" className="block text-sm font-medium text-gray-700 mb-2">
                   PIN Code *

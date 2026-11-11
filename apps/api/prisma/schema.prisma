@@ -32,10 +32,16 @@ model User {
   // Role-based access: 'customer' or 'admin'
   role          String    @default("customer")
 
+  // Granular admin role (null for customers). One of: SUPER_ADMIN, PRODUCT_MANAGER,
+  // ORDER_MANAGER, SUPPORT_MANAGER, CONTENT_MANAGER. Only meaningful when role = 'admin';
+  // the binary role field above remains the primary admin/customer gate.
+  adminRole     String?
+
   // Customer profile
   firstName     String?
   lastName      String?
   phoneNumber   String?
+  phoneVerified DateTime?
 
   // Account status
   isActive      Boolean   @default(true)
@@ -46,6 +52,7 @@ model User {
   orders        Order[]
   wishlist      WishlistItem[]
   sessions      Session[]
+  reviews       Review[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -72,8 +79,9 @@ model VerificationToken {
   id        String    @id @default(cuid())
   email     String
   token     String    @unique
-  type      String    // 'email_verification' or 'password_reset'
+  type      String    // 'email_verification' | 'password_reset' | 'email_otp' | 'mobile_otp' | 'login_otp'
   expiresAt DateTime
+  attempts  Int       @default(0) // incorrect-code attempts for OTP-type rows; the row is invalidated once this hits the configured max
 
   createdAt DateTime  @default(now())
 
@@ -135,6 +143,14 @@ model Product {
   // Availability
   isActive    Boolean   @default(true)
 
+  // Soft delete: a deleted product is never shown to customers or in the normal
+  // admin product list (same as isActive:false), but is kept out of that list
+  // entirely and surfaced in its own "Deleted Products" admin view instead, so a
+  // disabled-vs-deleted product is never ambiguous. Independent of isActive -
+  // restoring a deleted product does not automatically re-activate it.
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+
   // Variants (stored as JSON-encoded strings - SQLite has no native array/json type)
   colors      String    @default("[]")
   sizes       String    @default("[]")
@@ -144,6 +160,9 @@ model Product {
 
   // Cart items
   cartItems   CartItem[]
+
+  // Reviews (Phase 18)
+  reviews     Review[]
 
   // Order items
   orderItems  OrderItem[]
@@ -156,6 +175,7 @@ model Product {
 
   @@index([categoryId])
   @@index([isActive])
+  @@index([isDeleted])
   @@index([sku])
 }
 
@@ -277,6 +297,7 @@ model Order {
   // Relations
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   promotion     Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+  invoice       Invoice?  // one invoice per order (Invoice.orderId is @unique)
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -301,9 +322,104 @@ model OrderItem {
 
   order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  review    Review?
 
   @@index([orderId])
   @@index([productId])
+}
+
+// ============================================================================
+// INVOICES (Phase 17)
+// ============================================================================
+
+// One invoice per order. The `orderId` @unique constraint is the idempotency
+// guarantee - no matter how many times invoice creation is attempted (retries,
+// duplicate webhooks, concurrent calls), at most one Invoice row can exist for a
+// given order. The financial fields are a snapshot copied from the persisted
+// Order at creation time; because OrderItem.price is the price-at-time-of-order and
+// the order's subtotal/discount/shipping/tax/total are never mutated after
+// creation, the invoice total always agrees with the persisted order total and
+// the amount that was actually charged (Razorpay amount is cross-checked against
+// order.total before any online order is marked paid).
+model Invoice {
+  id            String    @id @default(cuid())
+  invoiceNumber String    @unique // e.g., PK-INV-2026-000001
+  orderId       String    @unique // one invoice per order (idempotency guarantee)
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Financial snapshot (all in paise, matching the Order) - copied at creation so
+  // the invoice is a stable, self-contained record independent of any later change.
+  subtotal      Int       // in paise (before discount)
+  discount      Int       @default(0) // in paise
+  shipping      Int       @default(0) // in paise
+  tax           Int       @default(0) // in paise (cgst+sgst, or igst)
+  total         Int       // in paise - must equal order.total
+  currency      String    @default("INR")
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([invoiceNumber])
+  @@index([orderId])
+}
+
+// ============================================================================
+// NOTIFICATIONS — transactional outbox (Phase 17)
+// ============================================================================
+
+// A durable record of every transactional email the system intends to send. An
+// event is created IN THE SAME DATABASE TRANSACTION as the change that caused it
+// (order placed, status changed, payment captured/failed/refunded), so a crash
+// between the commit and email delivery can never lose the notification - the
+// pending event survives and the NotificationProcessor drains and sends it.
+//
+// `idempotencyKey` (`${orderId}:${eventType}`) is @unique, so a retried/duplicate
+// trigger (e.g. Razorpay webhook redelivery) inserts at most one event and can
+// never produce a duplicate email. The processor sends each pending event with
+// retry/backoff, updating `status`/`attempts`/`lastError`/`nextRetryAt`.
+model NotificationEvent {
+  id             String    @id @default(cuid())
+  orderId        String?   // null only for non-order events (none today; allows future use)
+  eventType      String    // order_placed, payment_captured, payment_failed,
+                           // status_confirmed, status_processing, status_packed,
+                           // status_shipped, status_out_for_delivery, status_delivered,
+                           // status_cancelled, status_return_requested,
+                           // status_return_approved, status_return_rejected,
+                           // payment_refunded
+  idempotencyKey String    @unique // `${orderId}:${eventType}` - prevents duplicate events/emails
+  status         String    @default("pending") // pending, processing, sent, failed
+  attempts       Int       @default(0)
+  lastError      String?   // sanitized error message only - never secrets or PII
+  payload        String    // JSON-encoded template data snapshot at enqueue time
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  sentAt         DateTime?
+  nextRetryAt    DateTime?  // when to retry next (exponential backoff); null = immediately due
+
+  @@index([status])
+  @@index([orderId])
+  @@index([nextRetryAt])
+}
+
+// ============================================================================
+// ORDER STATUS AUDIT TRAIL (Phase 17)
+// ============================================================================
+
+// Every fulfillment-status transition is recorded here with who made it and when,
+// so the admin can show a true status history (not one inferred from updatedAt) and
+// the audit survives even if the order itself is later deleted. `changedBy` is the
+// admin user id (null for system-generated transitions, if any are added later).
+model OrderStatusEvent {
+  id          String   @id @default(cuid())
+  orderId     String
+  fromStatus  String
+  toStatus    String
+  changedBy   String?  // admin user id; null for system-generated transitions
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([createdAt])
 }
 
 // ============================================================================
@@ -586,6 +702,22 @@ model SettingsAuditLog {
   @@index([createdAt])
 }
 
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String   // Admin user ID who performed the action
+  actorEmail String   // Denormalized so the log stays readable if the actor is later deleted
+  action     String   // e.g. 'admin.create', 'admin.role_change', 'admin.deactivate', 'admin.activate'
+  targetId   String?  // Affected user/entity ID, if any
+  details    String?  // JSON string with before/after or other relevant context
+  ipAddress  String?
+
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
 // ============================================================================
 // CONTACT FORM
 // ============================================================================
@@ -602,5 +734,54 @@ model ContactMessage {
   createdAt   DateTime  @default(now())
 
   @@index([email])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PRODUCT REVIEWS (Phase 18)
+// ============================================================================
+
+// A review is tied to the specific purchased OrderItem, not just (userId, productId) -
+// `orderItemId` is @unique, which is both the DB-level guarantee that a given
+// purchase can only ever be reviewed once (no separate "already reviewed" check can
+// race past this) AND the purchase-verification anchor itself: walking
+// orderItem -> order lets the service confirm the reviewer owns the order, the
+// order was actually delivered, and the product matches - all from data the
+// customer cannot forge, never from a client-supplied userId/productId alone.
+// Re-purchasing the same product is a NEW OrderItem, so a second genuine purchase
+// can still be reviewed separately - this is deliberate, not a loophole.
+model Review {
+  id          String    @id @default(cuid())
+  productId   String
+  userId      String
+  orderItemId String    @unique
+
+  rating      Int       // 1-5
+  title       String
+  description String
+
+  // 'pending' (awaiting moderation), 'approved' (publicly visible, counted in
+  // ratings), 'rejected' (moderated out, never shown or counted)
+  status      String    @default("pending")
+
+  moderatedBy     String?   // admin user id
+  moderatedAt     DateTime?
+  moderationNote  String?
+
+  // Simple inappropriate-content signal (count of "report" clicks) - a full
+  // reports-with-reasons entity would be a separate feature; this is enough for
+  // an admin reviewing the moderation queue to prioritize what to look at first.
+  reportCount Int       @default(0)
+
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([productId, status])
+  @@index([userId])
+  @@index([status])
   @@index([createdAt])
 }

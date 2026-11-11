@@ -2,11 +2,14 @@ import { Controller, Get, Post, Put, Param, Query, Body, BadRequestException, Us
 import { InventoryService } from './inventory.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 
 /**
  * Inventory is an admin-only module - all endpoints require an authenticated admin.
  */
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+@RequirePermission('inventory:manage')
 @Controller('api/inventory')
 export class InventoryController {
   constructor(private inventoryService: InventoryService) {}

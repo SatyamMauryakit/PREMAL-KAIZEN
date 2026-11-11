@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminInventoryService, InventoryItem, LowStockResponse } from '@/lib/inventory-service';
@@ -62,6 +63,7 @@ export default function InventoryPage() {
   };
 
   return (
+    <RequirePermission permission="inventory:manage">
     <div className="min-h-screen bg-gray-light">
       <Header title="Inventory" subtitle="Monitor stock levels and manage warehouse operations." />
 
@@ -189,6 +191,7 @@ export default function InventoryPage() {
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">On Hand</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Reserved</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Available</th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Sold</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-dark">Actions</th>
                   </tr>
@@ -212,6 +215,7 @@ export default function InventoryPage() {
                       <td className="px-6 py-4 text-sm font-medium text-black">{item.onHand}</td>
                       <td className="px-6 py-4 text-sm text-gray-dark">{item.reserved}</td>
                       <td className="px-6 py-4 text-sm font-medium text-black">{item.available}</td>
+                      <td className="px-6 py-4 text-sm text-gray-dark">{item.sold}</td>
                       <td className="px-6 py-4 text-sm">
                         <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(item.status)}`}>
                           {formatStatus(item.status)}
@@ -219,7 +223,16 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-6 py-4 text-sm space-x-2">
                         <Link
-                          href={`/admin/inventory/adjust/${item.id}`}
+                          href={{
+                            pathname: `/admin/inventory/adjust/${item.productId}`,
+                            query: {
+                              size: item.size || '',
+                              color: item.color || '',
+                              name: item.product.name,
+                              sku: item.product.sku,
+                              onHand: item.onHand,
+                            },
+                          }}
                           className="text-black hover:text-gray-dark font-medium"
                         >
                           Adjust
@@ -262,5 +275,6 @@ export default function InventoryPage() {
         </div>
       </div>
     </div>
+    </RequirePermission>
   );
 }

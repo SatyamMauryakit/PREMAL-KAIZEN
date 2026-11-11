@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminOrdersService, Order } from '@/lib/orders-service';
@@ -65,6 +66,7 @@ export default function OrdersPage() {
   };
 
   return (
+    <RequirePermission permission="orders:view">
     <div className="min-h-screen bg-gray-light">
       <Header
         title="Orders"
@@ -194,5 +196,6 @@ export default function OrdersPage() {
         </div>
       </div>
     </div>
+    </RequirePermission>
   );
 }

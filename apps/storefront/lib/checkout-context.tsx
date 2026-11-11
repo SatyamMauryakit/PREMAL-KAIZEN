@@ -124,18 +124,24 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     code: string,
     userId: string,
     cartItems: Array<{ productId: string; quantity: number; price: number }>,
-    subtotal: number
+    subtotal: number  // in RUPEES (cart state unit)
   ) => {
     setIsApplyingCoupon(true);
     setCouponError(null);
     try {
+      // The promotions API works in PAISE (matches the backend's stored prices).
+      // Convert both the cart item prices and subtotal from rupees → paise.
+      const cartItemsPaise = cartItems.map((i) => ({ ...i, price: i.price * 100 }));
+      const subtotalPaise = subtotal * 100;
       const response = await fetch(`${API_BASE}/api/promotions/validate-coupon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ couponCode: code, userId, cartItems, subtotal }),
+        body: JSON.stringify({ couponCode: code, userId, cartItems: cartItemsPaise, subtotal: subtotalPaise }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Invalid coupon code');
+      // discountAmount returned is in paise — store as-is so OrderReview can use it
+      // with calculateTax/calculateShipping (both paise-based).
       setAppliedCoupon({ code: data.couponCode, discountAmount: data.discountAmount });
     } catch (err) {
       setCouponError(err instanceof Error ? err.message : 'Failed to apply coupon');

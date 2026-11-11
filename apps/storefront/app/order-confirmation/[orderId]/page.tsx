@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { use, useEffect, useState } from 'react';
-import { formatPrice } from '@/lib/pricing';
+import { formatPaise } from '@/lib/pricing';
 import { useCart } from '@/lib/cart-context';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
@@ -69,21 +69,21 @@ export default function OrderConfirmationPage({ params }: OrderConfirmationPageP
                 {order.items.map((item) => (
                   <div key={item.id} className="flex justify-between text-sm text-gray-700">
                     <span>{item.product.name} × {item.quantity}</span>
-                    <span>{formatPrice(item.price * item.quantity)}</span>
+                    <span>{formatPaise(item.price * item.quantity)}</span>
                   </div>
                 ))}
               </div>
               <div className="space-y-1 pt-4 border-t border-gray-300 text-sm">
-                <div className="flex justify-between text-gray-700"><span>Subtotal</span><span>{formatPrice(order.subtotal)}</span></div>
+                <div className="flex justify-between text-gray-700"><span>Subtotal</span><span>{formatPaise(order.subtotal)}</span></div>
                 {order.discount > 0 && (
                   <div className="flex justify-between text-green-700">
                     <span>Voucher {order.couponCode ? `(${order.couponCode})` : ''}</span>
-                    <span>-{formatPrice(order.discount)}</span>
+                    <span>-{formatPaise(order.discount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-700"><span>Shipping</span><span>{order.shipping === 0 ? 'FREE' : formatPrice(order.shipping)}</span></div>
-                <div className="flex justify-between text-gray-700"><span>Tax</span><span>{formatPrice(order.tax)}</span></div>
-                <div className="flex justify-between font-bold text-black pt-2 border-t"><span>Total</span><span>{formatPrice(order.total)}</span></div>
+                <div className="flex justify-between text-gray-700"><span>Shipping</span><span>{order.shipping === 0 ? 'FREE' : formatPaise(order.shipping)}</span></div>
+                <div className="flex justify-between text-gray-700"><span>Tax</span><span>{formatPaise(order.tax)}</span></div>
+                <div className="flex justify-between font-bold text-black pt-2 border-t"><span>Total</span><span>{formatPaise(order.total)}</span></div>
               </div>
             </div>
           )}

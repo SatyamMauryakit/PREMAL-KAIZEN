@@ -13,6 +13,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 import { STORAGE_ADAPTER, StorageAdapter } from './storage/storage-adapter.interface';
 import { MAX_FILE_SIZE_BYTES, imageFileFilter } from './upload-validation';
 
@@ -24,7 +26,8 @@ import { MAX_FILE_SIZE_BYTES, imageFileFilter } from './upload-validation';
  * only validates the incoming file and delegates persistence to that adapter; the
  * response shape (url, filename, size, mimeType) is unchanged regardless of backend.
  */
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+@RequirePermission('uploads:manage')
 @Controller('api/uploads')
 export class UploadsController {
   constructor(@Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter) {}

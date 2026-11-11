@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import { useState, useEffect } from 'react';
 import { adminAnalyticsService, DashboardMetrics, SalesData, ProductPerformance, OrderStatusDistribution } from '@/lib/analytics-service';
 
@@ -84,6 +85,7 @@ export default function AnalyticsDashboard() {
   };
 
   return (
+    <RequirePermission permission="analytics:view">
     <div className="min-h-screen bg-gray-light">
       <Header
         title="Analytics Dashboard"
@@ -324,5 +326,6 @@ export default function AnalyticsDashboard() {
         )}
       </div>
     </div>
+    </RequirePermission>
   );
 }

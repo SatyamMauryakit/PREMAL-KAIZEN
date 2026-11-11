@@ -16,6 +16,7 @@ export interface InventoryItem {
   onHand: number;
   reserved: number;
   available: number;
+  sold: number;
   reorderThreshold: number;
   status: 'in_stock' | 'low_stock' | 'out_of_stock';
   createdAt: string;

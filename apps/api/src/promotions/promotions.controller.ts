@@ -2,18 +2,22 @@ import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, BadRequest
 import { PromotionsService } from './promotions.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 
 @Controller('api/promotions')
 export class PromotionsController {
   constructor(private promotionsService: PromotionsService) {}
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Get('stats')
   async getStats() {
     return this.promotionsService.getStats();
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Get()
   async findAll(@Query() query: any) {
     return this.promotionsService.findAll({
@@ -25,13 +29,15 @@ export class PromotionsController {
     });
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.promotionsService.findById(id);
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Post()
   async create(@Body() body: any) {
     if (!body.name || !body.type) {
@@ -40,19 +46,22 @@ export class PromotionsController {
     return this.promotionsService.create(body);
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Put(':id')
   async update(@Param('id') id: string, @Body() body: any) {
     return this.promotionsService.update(id, body);
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Delete(':id')
   async delete(@Param('id') id: string) {
     return this.promotionsService.delete(id);
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Put(':id/toggle')
   async toggleActive(@Param('id') id: string, @Body() body: any) {
     if (body.isActive === undefined) {
@@ -61,7 +70,8 @@ export class PromotionsController {
     return this.promotionsService.toggleActive(id, body.isActive);
   }
 
-  @UseGuards(AuthGuard, AdminGuard)
+  @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+  @RequirePermission('promotions:manage')
   @Post(':id/coupons')
   async createCouponCodes(
     @Param('id') promotionId: string,

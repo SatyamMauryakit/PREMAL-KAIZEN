@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { RequirePermission } from '@/components/RequirePermission';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { adminProductsService, ProductResponse } from '@/lib/products-service';
@@ -10,13 +11,14 @@ export default function ProductsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'active' | 'inactive' | 'out_of_stock' | 'all'>('all');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     loadProducts();
-  }, [page, search]);
+  }, [page, search, status]);
 
   const loadProducts = async () => {
     setIsLoading(true);
@@ -24,7 +26,7 @@ export default function ProductsPage() {
       const token = localStorage.getItem('adminSessionToken') || localStorage.getItem('sessionToken');
       if (!token) throw new Error('Not authenticated');
 
-      const result = await adminProductsService.getProducts(token, page, 20, search);
+      const result = await adminProductsService.getProducts(token, page, 20, search, undefined, status);
       setProducts(result.data);
       setTotal(result.total);
       setError(null);
@@ -37,7 +39,7 @@ export default function ProductsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
+    if (!confirm('Delete this product? It will be hidden from the store and this list, but can be restored later from Deleted Products.')) return;
 
     setDeleting(id);
     try {
@@ -58,6 +60,7 @@ export default function ProductsPage() {
   };
 
   return (
+    <RequirePermission permission="products:view">
     <div className="min-h-screen bg-gray-light">
       <Header
         title="Products"
@@ -85,13 +88,34 @@ export default function ProductsPage() {
                 }}
                 className="px-4 py-2 border border-gray-light rounded text-sm focus:outline-none focus:border-black"
               />
+              <select
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value as 'active' | 'inactive' | 'out_of_stock' | 'all');
+                  setPage(1);
+                }}
+                className="px-4 py-2 border border-gray-light rounded text-sm focus:outline-none focus:border-black"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Disabled only</option>
+                <option value="out_of_stock">Out of Stock</option>
+              </select>
             </div>
-            <Link
-              href="/admin/products/create"
-              className="px-4 py-2 bg-black text-cream font-medium rounded hover:bg-gray-dark transition-colors text-sm"
-            >
-              + Add Product
-            </Link>
+            <div className="flex gap-3">
+              <Link
+                href="/admin/products/deleted"
+                className="px-4 py-2 border border-gray-light text-gray-dark font-medium rounded hover:border-black hover:text-black transition-colors text-sm"
+              >
+                Deleted Products
+              </Link>
+              <Link
+                href="/admin/products/create"
+                className="px-4 py-2 bg-black text-cream font-medium rounded hover:bg-gray-dark transition-colors text-sm"
+              >
+                + Add Product
+              </Link>
+            </div>
           </div>
 
           {/* Products Table */}
@@ -192,5 +216,6 @@ export default function ProductsPage() {
         </div>
       </div>
     </div>
+    </RequirePermission>
   );
 }

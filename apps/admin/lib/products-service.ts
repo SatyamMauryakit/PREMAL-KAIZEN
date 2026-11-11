@@ -8,6 +8,8 @@ export interface ProductResponse {
   price: number;
   originalPrice: number | null;
   isActive: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
   colors: string[];
   sizes: string[];
   categoryId: string | null;
@@ -71,15 +73,20 @@ export const adminProductsService = {
     page?: number,
     limit?: number,
     search?: string,
-    category?: string
+    category?: string,
+    status?: 'active' | 'inactive' | 'out_of_stock' | 'all'
   ): Promise<ProductsListResponse> {
     const params = new URLSearchParams();
     if (page) params.append('page', page.toString());
     if (limit) params.append('limit', limit.toString());
     if (search) params.append('search', search);
     if (category) params.append('category', category);
+    params.append('status', status || 'all');
 
-    const response = await fetch(`${API_BASE}/api/products?${params}`, {
+    // Admin-only endpoint: shows products of every status by default, unlike the
+    // public /api/products (which always hides disabled products) - otherwise
+    // disabling a product from this panel made it look deleted here too.
+    const response = await fetch(`${API_BASE}/api/products/admin?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -134,6 +141,11 @@ export const adminProductsService = {
     return response.json();
   },
 
+  /**
+   * Soft-deletes the product (hidden from the storefront and the normal admin
+   * list, but recoverable) - never a hard delete. See getDeletedProducts/
+   * restoreProduct/permanentlyDeleteProduct below for the rest of the lifecycle.
+   */
   async deleteProduct(id: string, token: string): Promise<{ success: boolean }> {
     const response = await fetch(`${API_BASE}/api/products/${id}`, {
       method: 'DELETE',
@@ -141,6 +153,58 @@ export const adminProductsService = {
     });
 
     if (!response.ok) throw new Error('Failed to delete product');
+    return response.json();
+  },
+
+  /** "Deleted Products" admin view - the only place a soft-deleted product is ever listed. */
+  async getDeletedProducts(
+    token: string,
+    page?: number,
+    limit?: number,
+    search?: string
+  ): Promise<ProductsListResponse> {
+    const params = new URLSearchParams();
+    if (page) params.append('page', page.toString());
+    if (limit) params.append('limit', limit.toString());
+    if (search) params.append('search', search);
+
+    const response = await fetch(`${API_BASE}/api/products/admin/deleted?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch deleted products');
+    return response.json();
+  },
+
+  /** Undoes a soft delete. Comes back as a disabled draft - does not auto re-activate it. */
+  async restoreProduct(id: string, token: string): Promise<ProductResponse> {
+    const response = await fetch(`${API_BASE}/api/products/${id}/restore`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to restore product');
+    }
+    return response.json();
+  },
+
+  /**
+   * Permanently removes the row. Only succeeds for an already-deleted product
+   * with no historical orders referencing it - surfaces the backend's specific
+   * refusal message (e.g. order-history dependency) rather than a generic one.
+   */
+  async permanentlyDeleteProduct(id: string, token: string): Promise<{ success: boolean }> {
+    const response = await fetch(`${API_BASE}/api/products/${id}/permanent`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to permanently delete product');
+    }
     return response.json();
   },
 };

@@ -51,7 +51,7 @@ export default function ShippingForm() {
       <div className="bg-white rounded-lg p-8">
         <div className="space-y-6">
           {/* Shipping form fields */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <input type="text" placeholder="First Name *" value={form.firstName} onChange={(e) => setForm({...form, firstName: e.target.value})} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige" required />
             <input type="text" placeholder="Last Name *" value={form.lastName} onChange={(e) => setForm({...form, lastName: e.target.value})} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige" required />
           </div>
@@ -64,7 +64,7 @@ export default function ShippingForm() {
 
           <input type="text" placeholder="Landmark (optional)" value={form.landmark} onChange={(e) => setForm({...form, landmark: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige" />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <input type="text" placeholder="City *" value={form.city} onChange={(e) => setForm({...form, city: e.target.value})} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige" required />
             <select value={form.state} onChange={(e) => setForm({...form, state: e.target.value})} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige bg-white" required>
               <option value="">State / UT *</option>

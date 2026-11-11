@@ -3,7 +3,7 @@
 import { useCart } from '@/lib/cart-context';
 import { useCheckout } from '@/lib/checkout-context';
 import { useAuth } from '@/lib/auth-context';
-import { formatPrice } from '@/lib/pricing';
+import { formatPrice, formatPaise } from '@/lib/pricing';
 import { useEffect, useState } from 'react';
 import { getCheckoutSettings, calculateTax, calculateShipping, CheckoutSettings } from '@/lib/checkout-settings';
 import { openRazorpayCheckout } from '@/lib/razorpay-checkout';
@@ -21,13 +21,28 @@ export default function OrderReview() {
     getCheckoutSettings().then(setSettings).catch(() => setSettings(null));
   }, []);
 
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const discount = appliedCoupon?.discountAmount || 0;
-  const taxable = Math.max(0, subtotal - discount);
+  // Cart stores prices in rupees (integer). calculateShipping and calculateTax
+  // expect paise (the unit the settings API returns). Convert once here so the
+  // entire checkout summary is consistent with what the backend will compute.
+  const subtotalRupees = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotalPaise = subtotalRupees * 100;
+  // Coupon discountAmount comes back from the validate-coupon API in paise
+  // (PromotionsService computes discounts against a paise-based subtotal).
+  const discountPaise = appliedCoupon?.discountAmount || 0;
+  const taxablePaise = Math.max(0, subtotalPaise - discountPaise);
   const selectedMethod = settings?.shippingMethods.find((m) => m.id === shippingMethod);
-  const shipping = settings ? calculateShipping(subtotal, selectedMethod) : 0;
-  const tax = settings ? calculateTax(taxable, settings) : 0;
-  const total = taxable + tax + shipping;
+  const shippingPaise = settings ? calculateShipping(subtotalPaise, selectedMethod) : 0;
+  const taxPaise = settings ? calculateTax(taxablePaise, settings) : 0;
+  const totalPaise = taxablePaise + taxPaise + shippingPaise;
+
+  // For display we keep using formatPrice (rupees) since these are all now in paise.
+  // formatPaise divides by 100 before formatting.
+  const subtotal = subtotalRupees; // kept for item display (cart is in rupees)
+  const discount = discountPaise;
+  const taxable = taxablePaise;
+  const shipping = shippingPaise;
+  const tax = taxPaise;
+  const total = totalPaise;
 
   const handlePlaceOrder = async () => {
     setIsPlacing(true);
@@ -175,12 +190,12 @@ export default function OrderReview() {
           <div className="flex justify-between text-gray-700"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
           {discount > 0 && (
             <div className="flex justify-between text-green-700">
-              <span>Voucher ({appliedCoupon?.code})</span><span>-{formatPrice(discount)}</span>
+              <span>Voucher ({appliedCoupon?.code})</span><span>-{formatPaise(discount)}</span>
             </div>
           )}
-          <div className="flex justify-between text-gray-700"><span>Shipping{selectedMethod ? ` (${selectedMethod.name})` : ''}</span><span>{shipping === 0 ? 'FREE' : formatPrice(shipping)}</span></div>
-          <div className="flex justify-between text-gray-700"><span>{settings && settings.taxRate > 0 ? `GST (${settings.taxRate}%)` : 'GST'}</span><span>{formatPrice(tax)}</span></div>
-          <div className="flex justify-between pt-2 border-t font-bold text-black"><span>Total</span><span>{formatPrice(total)}</span></div>
+          <div className="flex justify-between text-gray-700"><span>Shipping{selectedMethod ? ` (${selectedMethod.name})` : ''}</span><span>{shipping === 0 ? 'FREE' : formatPaise(shipping)}</span></div>
+          <div className="flex justify-between text-gray-700"><span>{settings && settings.taxRate > 0 ? `GST (${settings.taxRate}%)` : 'GST'}</span><span>{formatPaise(tax)}</span></div>
+          <div className="flex justify-between pt-2 border-t font-bold text-black"><span>Total</span><span>{formatPaise(total)}</span></div>
         </div>
       </div>
 

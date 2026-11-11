@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { extname } from 'path';
 import * as crypto from 'crypto';
 import { StorageAdapter, StoredFile } from './storage-adapter.interface';
+import { safeExtensionFor } from '../upload-validation';
 
 export interface S3StorageConfig {
   bucket: string;
@@ -30,7 +30,7 @@ export class S3StorageAdapter implements StorageAdapter {
   }
 
   async save(file: Express.Multer.File): Promise<StoredFile> {
-    const key = `${this.config.keyPrefix}${crypto.randomBytes(16).toString('hex')}${extname(file.originalname)}`;
+    const key = `${this.config.keyPrefix}${crypto.randomBytes(16).toString('hex')}${safeExtensionFor(file.mimetype)}`;
 
     await this.client.send(
       new PutObjectCommand({

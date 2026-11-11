@@ -3,9 +3,27 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { SettingsService } from '../settings/settings.service';
 import { RazorpayService } from '../payments/razorpay.service';
-import { EmailService } from '../email/email.service';
+import { NotificationService } from '../notifications/notification.service';
+import { InvoicesService } from '../invoices/invoices.service';
+import { buildOrderPayload } from '../notifications/order-payload';
+import { InventoryService } from '../inventory/inventory.service';
 
-const VALID_ORDER_STATUSES = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
+const VALID_ORDER_STATUSES = [
+  'pending',
+  'confirmed',
+  'processing',
+  'packed',
+  'shipped',
+  'out_for_delivery',
+  'delivered',
+  'cancelled',
+  // Returns (added with this change) — backward compatible: delivered was terminal,
+  // it now also allows a return request. These are admin-settable labels; the store
+  // has no customer-initiated RMA flow, so they're driven by admin action + email.
+  'return_requested',
+  'return_approved',
+  'return_rejected',
+];
 const VALID_PAYMENT_STATUSES = ['pending', 'completed', 'failed', 'refunded'];
 
 // Status transition rules: what statuses can transition to what
@@ -16,8 +34,11 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   packed: ['shipped', 'cancelled'],
   shipped: ['out_for_delivery'],
   out_for_delivery: ['delivered'],
-  delivered: [], // Terminal state
+  delivered: ['return_requested'], // a delivered order can initiate a return
   cancelled: [], // Terminal state
+  return_requested: ['return_approved', 'return_rejected'],
+  return_approved: [], // Terminal (refund, if any, is a payment-status change)
+  return_rejected: [], // Terminal
 };
 
 @Injectable()
@@ -29,8 +50,10 @@ export class OrdersService {
     private promotionsService: PromotionsService,
     private settingsService: SettingsService,
     private razorpayService: RazorpayService,
-    private emailService: EmailService,
-  ) {}
+    private notificationService: NotificationService,
+    private invoicesService: InvoicesService,
+    private inventoryService: InventoryService,
+  ) { }
 
   async findAll(filters?: {
     page?: number;
@@ -349,14 +372,32 @@ export class OrdersService {
         await this.promotionsService.redeemCouponInTx(tx, couponCode, userId, created.id, discount);
       }
 
+      // Atomically decrement stock for every line item inside this transaction.
+      // If any variant is out of stock the whole transaction rolls back — no order
+      // is created and no stock is taken. Variants with no inventory row are skipped
+      // (unlimited stock for that variant).
+      await this.inventoryService.decrementForOrder(lineItems, tx, created.id);
+
+      // The purchased items now belong to an order, not the cart - clear the
+      // customer's saved cart here, atomically with order creation, rather than
+      // relying solely on the frontend's best-effort DELETE after redirecting to
+      // the confirmation page (which can be cut off mid-flight by that same
+      // navigation and silently never arrive). This mirrors the stock decrement
+      // above: both happen at order-creation time, for COD and online payment
+      // alike, not deferred to payment confirmation.
+      await tx.cartItem.deleteMany({ where: { userId } });
+
       return created;
     });
 
     if (paymentMethod === 'cod') {
       // COD orders are complete as soon as they're created - payment is collected on
-      // delivery, not here. Send the placement email now; never claim payment succeeded.
-      await this.sendCodConfirmationEmail(order.id);
-      return this.findById(order.id);
+      // delivery, not here. Issue the invoice and enqueue the order-confirmation
+      // notification in the same transaction, so a crash can't leave an order without
+      // its invoice or its confirmation email intent. Never claim payment succeeded.
+      const full = await this.findById(order.id);
+      await this.finalizeCodOrder(order.id, full, { subtotal, discount, shipping, tax, total });
+      return full;
     }
 
     // Online payment methods: the order is created as pending/unpaid, and a matching
@@ -378,38 +419,30 @@ export class OrdersService {
     }
   }
 
-  private async sendCodConfirmationEmail(orderId: string): Promise<void> {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { items: { include: { product: true } }, user: true, address: true },
+  /**
+   * For a COD order: create its invoice (idempotent) and enqueue the order-placed
+   * notification in one transaction. The order-confirmation email is then delivered by
+   * the NotificationProcessor with the invoice attached. Idempotent on retry — the
+   * invoice's `orderId` @unique and the notification's `idempotencyKey` mean a
+   * repeated call is a no-op.
+   */
+  private async finalizeCodOrder(
+    orderId: string,
+    order: any,
+    snapshot: { subtotal: number; discount: number; shipping: number; tax: number; total: number },
+  ): Promise<void> {
+    const payload = buildOrderPayload(order);
+    await this.prisma.$transaction(async (tx) => {
+      await this.invoicesService.ensureInvoice(orderId, { tx, snapshot });
+      await this.notificationService.enqueue(orderId, 'order_placed', payload, { tx });
     });
-    if (!order || order.orderEmailSentAt) return;
-
-    const sent = await this.emailService.sendCodOrderPlacedEmail({
-      toEmail: order.user.email,
-      customerName: order.user.firstName || order.user.email,
-      orderNumber: order.orderNumber,
-      orderId: order.id,
-      paymentMethod: order.paymentMethod,
-      paymentStatus: order.paymentStatus,
-      total: order.total,
-      items: order.items.map((i) => ({
-        name: i.product?.name || 'Product',
-        quantity: i.quantity,
-        price: i.price,
-        selectedSize: i.selectedSize,
-        selectedColor: i.selectedColor,
-      })),
-      shippingSummary: order.address ? `${order.address.city}, ${order.address.state} ${order.address.postalCode}` : undefined,
-    });
-
-    if (sent) {
-      await this.prisma.order.update({ where: { id: order.id }, data: { orderEmailSentAt: new Date() } });
-    }
   }
 
-  async updateStatus(id: string, newStatus: string) {
-    const order = await this.prisma.order.findUnique({ where: { id } });
+  async updateStatus(id: string, newStatus: string, changedBy?: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { items: { include: { product: true } }, address: true, user: true },
+    });
 
     if (!order) {
       throw new NotFoundException(`Order with ID ${id} not found`);
@@ -427,20 +460,51 @@ export class OrdersService {
       );
     }
 
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: {
-        status: newStatus,
-        updatedAt: new Date(),
-      },
-      include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+    const payload = buildOrderPayload(order);
+    payload.fromStatus = order.status;
+    payload.newStatus = newStatus;
+
+    // Persist the status change, record the audit trail (who/when/from->to), and
+    // enqueue the customer-facing status notification all in one transaction, so the
+    // audit and notification intent can never be lost relative to the status update.
+    // The email itself is delivered later by the NotificationProcessor.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderStatusEvent.create({
+        data: {
+          orderId: id,
+          fromStatus: order.status,
+          toStatus: newStatus,
+          changedBy: changedBy ?? null,
+        },
+      });
+      await this.notificationService.enqueue(id, `status_${newStatus}`, payload, { tx });
+      return tx.order.update({
+        where: { id },
+        data: {
+          status: newStatus,
+          updatedAt: new Date(),
+        },
+        include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      });
     });
+
+    // Restore stock after the status transition commits. Only do this when
+    // transitioning INTO cancelled (not on every save), so stock is restored
+    // exactly once per cancellation even if the endpoint is called redundantly.
+    if (newStatus === 'cancelled') {
+      await this.inventoryService.restoreForCancellation(order.items, id).catch((err) => {
+        this.logger.error(`Stock restore failed for cancelled order ${id}: ${err.message}`);
+      });
+    }
 
     return updated;
   }
 
-  async updatePaymentStatus(id: string, paymentStatus: string) {
-    const order = await this.prisma.order.findUnique({ where: { id } });
+  async updatePaymentStatus(id: string, paymentStatus: string, changedBy?: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { items: { include: { product: true } }, address: true, user: true },
+    });
 
     if (!order) {
       throw new NotFoundException(`Order with ID ${id} not found`);
@@ -450,14 +514,34 @@ export class OrdersService {
       throw new BadRequestException(`Invalid payment status: ${paymentStatus}`);
     }
 
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: {
-        paymentStatus,
-        updatedAt: new Date(),
-      },
-      include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+    // A transition into 'refunded' notifies the customer. This is only enqueued when
+    // actually crossing into refunded, and the outbox idempotency key means it fires
+    // exactly once even if the admin saves twice. The email communicates the actual
+    // result (refund initiated) — it never claims a refund before the admin confirms it.
+    const transitioningToRefunded = paymentStatus === 'refunded' && order.paymentStatus !== 'refunded';
+    const payload = buildOrderPayload(order);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (transitioningToRefunded) {
+        await this.notificationService.enqueue(id, 'payment_refunded', payload, { tx });
+      }
+      return tx.order.update({
+        where: { id },
+        data: {
+          paymentStatus,
+          updatedAt: new Date(),
+        },
+        include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
+      });
     });
+
+    // Restore stock on refund (only when the order hasn't already been cancelled,
+    // which would have restored stock already).
+    if (transitioningToRefunded && order.status !== 'cancelled') {
+      await this.inventoryService.restoreForCancellation(order.items, id).catch((err) => {
+        this.logger.error(`Stock restore failed for refunded order ${id}: ${err.message}`);
+      });
+    }
 
     return updated;
   }

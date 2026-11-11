@@ -2,8 +2,11 @@ import { Controller, Get, Query, BadRequestException, UseGuards } from '@nestjs/
 import { AnalyticsService } from './analytics.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { PermissionGuard } from '../common/rbac/permission.guard';
+import { RequirePermission } from '../common/rbac/require-permission.decorator';
 
-@UseGuards(AuthGuard, AdminGuard)
+@UseGuards(AuthGuard, AdminGuard, PermissionGuard)
+@RequirePermission('analytics:view')
 @Controller('api/admin/analytics')
 export class AnalyticsController {
   constructor(private analyticsService: AnalyticsService) {}

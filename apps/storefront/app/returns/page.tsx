@@ -1,6 +1,12 @@
-'use client';
-
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import { buildStaticMetadata } from '@/lib/metadata';
+
+export const metadata: Metadata = buildStaticMetadata({
+  title: 'Returns & Exchanges',
+  description: 'Read the PREMAL KAIZEN returns and exchanges policy before requesting a return.',
+  path: '/returns',
+});
 
 export default function ReturnsPage() {
   return (

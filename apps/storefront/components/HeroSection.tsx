@@ -38,32 +38,9 @@ export const HeroSection: React.FC = () => {
             <Link
               href="/shop?filter=new"
               className="px-8 py-3 border-2 border-cream text-cream font-semibold hover:bg-cream hover:text-black transition-all rounded-md text-center inline-block"
-              style={{ borderColor: '#F5F1ED', color: '#F5F1ED' }}
             >
               New Collection
             </Link>
-          </div>
-
-          {/* Trust indicators */}
-          <div className="flex flex-col sm:flex-row gap-6 sm:gap-8 text-xs sm:text-sm text-gray-300">
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              <span>100% Cotton</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m0 10v10l8 4m0-10l8-4" />
-              </svg>
-              <span>Pan-India Delivery</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m7.5-4.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>Cash on Delivery Available</span>
-            </div>
           </div>
         </div>
 
@@ -78,6 +55,38 @@ export const HeroSection: React.FC = () => {
           />
           {/* Overlay gradient for depth and text contrast */}
           <div className="absolute inset-0 bg-gradient-to-l from-black/0 via-black/10 to-black/30 z-10" />
+        </div>
+      </div>
+
+      {/* Trust indicators - a full-width strip below both columns, not squeezed into
+          the left column's half-width, so all four fit on one line at normal desktop
+          widths instead of wrapping into two rows. */}
+      <div className="relative z-20 bg-neutral-950 border-t border-white/10 px-8 sm:px-12 md:px-16 py-5">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 sm:gap-x-8 text-xs sm:text-sm text-gray-300">
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <span>Premium Quality | Mix Fabrics</span>
+          </div>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m0 10v10l8 4m0-10l8-4" />
+            </svg>
+            <span>Pan-India Delivery</span>
+          </div>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span>Fast &amp; Secure Prepaid Delivery</span>
+          </div>
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m7.5-4.5a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Cash on Delivery Available</span>
+          </div>
         </div>
       </div>
     </section>
