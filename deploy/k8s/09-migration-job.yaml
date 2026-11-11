@@ -1,0 +1,86 @@
+# One-shot Prisma migration Job. This is the ONLY thing allowed to run
+# `prisma migrate deploy` against the real database - the API pods never do, and
+# never will (see 10-api.yaml). deploy.sh applies this, waits for it to reach
+# `Complete`, and refuses to (re)apply the API Deployment if it doesn't.
+#
+# Why a Job instead of relying on `npx prisma` inside a running API pod (what was
+# tried manually and failed with "pnpm: not found"): `pnpm` is deliberately NOT
+# installed in the runtime image (see apps/api/Dockerfile) - only `node` itself,
+# which does ship `npx`. The devDependency `prisma` CLI package IS present in the
+# image (the runtime stage copies the FULL node_modules forward, not a --prod
+# prune - see that Dockerfile's comment), so the locally-resolved binary at
+# `node_modules/.bin/prisma` works without needing pnpm, npx's registry-resolution
+# path, or network access at all. This Job invokes that binary directly, not `npx`,
+# to remove any ambiguity about how npx would resolve the command.
+#
+# Idempotent: `prisma migrate deploy` only applies migrations not yet recorded as
+# applied - rerunning it against an already-up-to-date database is a safe no-op,
+# not a reset. `backoffLimit: 0` means a real failure is reported immediately
+# (as a failed Job you can inspect), not silently retried and masked.
+#
+# Mounts the SAME PVC/subPath as the API Deployment, so this operates on the one
+# real dev.db file (the EC2-host-mounted one), never a fresh/ephemeral copy.
+# deploy.sh scales the API Deployment to 0 replicas before running this Job and
+# only scales it back up after the Job succeeds - so this Job and an API pod are
+# never both writing to the SQLite file at the same time, and multiple Deployment
+# replicas never run this concurrently (replicas stays 1 for the API regardless).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: premal-api-migrate
+  namespace: premal-kaizen
+  labels:
+    app: premal-api-migrate
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: premal-api-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      initContainers:
+        - name: init-data-dirs
+          image: premal-api:local
+          imagePullPolicy: Never
+          command: ["sh", "-c", "mkdir -p /data/db /data/uploads && touch /data/db/dev.db"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: migrate
+          image: premal-api:local
+          imagePullPolicy: Never
+          workingDir: /app/apps/api
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Running prisma migrate deploy against the mounted database..."
+              ./node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
+              echo "Migrations applied successfully."
+          envFrom:
+            - configMapRef:
+                name: premal-api-config
+            - secretRef:
+                name: premal-api-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /app/apps/api/prisma/dev.db
+              subPath: db/dev.db
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: premal-api-data

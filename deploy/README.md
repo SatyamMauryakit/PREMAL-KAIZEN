@@ -10,7 +10,16 @@ for running the full stack (storefront, admin, API) on one EC2 instance.
    **not** open any other ports yet - `deploy.sh` will tell you exactly which ones to
    add, and will not open them for you.
 2. `git clone` this repository onto the instance and `cd` into it.
-3. `chmod +x deploy.sh && ./deploy.sh`
+3. `chmod +x deploy.sh && ./deploy.sh` (staging mode) or
+   `DEPLOY_MODE=production ./deploy.sh` (production mode - requires real Razorpay/SMTP
+   values already set in `deploy/k8s/02-secret.yaml`, see
+   `../PRODUCTION_DEPLOYMENT_GUIDE.md` for the full difference between the two modes).
+
+As of this revision, `deploy.sh` also runs Prisma migrations automatically (via a
+dedicated Kubernetes Job, gated before the API ever starts - see
+`../DEPLOYMENT_AUDIT_REPORT.md` Issue B) and no longer treats "this EC2 host can't curl
+its own public IP" as a deployment failure (see Issue A in that same report). See
+`../DEPLOYMENT_TROUBLESHOOTING.md` for a practical runbook of common problems.
 
 ## What it does
 
@@ -59,18 +68,20 @@ Phase H-K scratch exploration may have tested elsewhere). The tracked migration 
 is applied with the standard `prisma migrate deploy` - verified correct for this exact
 provider and history, not assumed.
 
-`deploy.sh` never runs a migration or touches an existing `dev.db` automatically. After
-the pods are up, it runs a **read-only** `prisma migrate status` inside the API pod
-(this only reads migration metadata, never modifies the database) and tells you plainly
-whether the schema is up to date or still needs the one-time `migrate deploy` command -
-it does not guess this from the file's size, since SQLite can write its own header as
-soon as anything connects (even the readiness probe's own `SELECT 1`), which would make
-a "is the file empty" check silently stop being accurate after the first pod start.
+**Updated behavior**: `deploy.sh` now runs `prisma migrate deploy` automatically, via a
+dedicated, one-shot Kubernetes Job (`deploy/k8s/09-migration-job.yaml`), gated strictly
+*before* the API Deployment is (re)applied - a prior version of this script left this
+as a manual step, which caused a real incident (the API started against a schema-less
+database and background processors failed with "table does not exist"). See
+`../DEPLOYMENT_AUDIT_REPORT.md` Issue B for the full root cause. This is still never
+`migrate reset` or `db push --force-reset` - only the idempotent `migrate deploy`,
+which is a safe no-op on an already-up-to-date database.
 
-If you have an existing `dev.db` you want this deployment to use, `scp` it to
-`/opt/premal-kaizen/data/db/dev.db` on the EC2 host *before* running `deploy.sh` (or
-before the first pod start) - it will be reused as-is, never reset or migrated
-automatically.
+It still never touches an existing `dev.db`'s *data* - only its *schema*, and only by
+applying migrations already committed to this repo. If you have an existing `dev.db`
+you want this deployment to use, `scp` it to `/opt/premal-kaizen/data/db/dev.db` on the
+EC2 host *before* running `deploy.sh` (or before the first pod/Job start) - it will be
+reused as-is, its existing rows never reset, only brought up to the current schema.
 
 ## Secrets
 
