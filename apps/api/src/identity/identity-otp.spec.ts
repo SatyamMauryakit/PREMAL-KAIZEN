@@ -15,6 +15,7 @@ function makePrisma(overrides: any = {}) {
   return {
     user: {
       findUnique: vi.fn().mockResolvedValue({ id: 'user_1', email: 'user@example.com', firstName: 'Priya', emailVerified: null }),
+      findFirst: vi.fn().mockResolvedValue(null), // no phone-number conflict by default
       update: vi.fn().mockResolvedValue({}),
       create: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
@@ -27,7 +28,14 @@ function makePrisma(overrides: any = {}) {
       update: vi.fn().mockResolvedValue({}),
       create: vi.fn().mockImplementation(({ data }) => ({ id: 'tok_1', ...data })),
     },
-    session: { create: vi.fn(), deleteMany: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
+    otpLockout: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+    otpSendLog: { count: vi.fn().mockResolvedValue(0), create: vi.fn().mockResolvedValue({}) },
+    session: {
+      create: vi.fn().mockResolvedValue({ id: 'sess_1', token: 'sometoken', expiresAt: new Date() }),
+      deleteMany: vi.fn(),
+      findUnique: vi.fn(),
+      delete: vi.fn(),
+    },
     ...overrides,
   } as any;
 }
@@ -58,7 +66,7 @@ describe('IdentityService.sendEmailOtp', () => {
     );
     // Email called with OTP (we can't check the plaintext value, but we confirm the call was made)
     expect(emailService.sendEmailOtpEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ toEmail: 'user@example.com', expiryMinutes: 15 }),
+      expect.objectContaining({ toEmail: 'user@example.com', expiryMinutes: 5 }),
     );
   });
 
@@ -159,6 +167,9 @@ describe('IdentityService.verifyEmailOtp', () => {
       expect.objectContaining({ data: expect.objectContaining({ emailVerified: expect.any(Date) }) }),
     );
     expect(prisma.verificationToken.delete).toHaveBeenCalledWith({ where: { id: 'tok_1' } });
+    // Email verification is the only activation step - a session is issued immediately.
+    expect(result.sessionReady).toBe(true);
+    expect(result.sessionToken).toBe('sometoken');
   });
 
   it('throws on incorrect OTP and increments the attempt counter (does not delete the row - the code is still usable)', async () => {
@@ -212,7 +223,7 @@ describe('IdentityService.verifyEmailOtp', () => {
     prisma.user.findUnique = vi.fn().mockResolvedValue(null);
     prisma.user.create = vi.fn().mockResolvedValue({
       id: 'user_2', email: 'brand-new@example.com', firstName: null, lastName: null,
-      emailVerified: null, role: 'customer', isActive: true, lastLogin: null,
+      phoneNumber: '+919876543210', emailVerified: null, phoneVerified: null, role: 'customer', isActive: true, lastLogin: null,
       createdAt: new Date(), updatedAt: new Date(), password: '$2b$10$hash',
     });
     prisma.verificationToken.deleteMany = vi.fn().mockResolvedValue({});
@@ -225,8 +236,47 @@ describe('IdentityService.verifyEmailOtp', () => {
 
     const service = new IdentityService(prisma, emailService, makeAdminAuditLog());
 
-    // register() must succeed — it calls sendWelcomeEmail / sendEmailOtp with .catch()
-    // so SMTP failures are silently swallowed and do not bubble up to the caller.
-    await expect(service.register('brand-new@example.com', 'Password1!')).resolves.toBeDefined();
+    // register() must succeed — it calls sendWelcomeEmail / sendEmailOtp with
+    // .catch() so provider failures are silently swallowed and never bubble up.
+    await expect(service.register('brand-new@example.com', 'Password1!', undefined, undefined, '9876543210')).resolves.toBeDefined();
+  });
+});
+
+describe('IdentityService.register - mobile number is optional, permanent, and never verified', () => {
+  it('registers successfully with no phone number at all', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique = vi.fn().mockResolvedValue(null);
+    prisma.user.create = vi.fn().mockResolvedValue({
+      id: 'user_3', email: 'nophone@example.com', firstName: null, lastName: null, phoneNumber: null,
+      emailVerified: null, role: 'customer', isActive: true, lastLogin: null,
+      createdAt: new Date(), updatedAt: new Date(), password: '$2b$10$hash',
+    });
+    const service = new IdentityService(prisma, makeEmailService(), makeAdminAuditLog());
+
+    await expect(service.register('nophone@example.com', 'Password1!')).resolves.toBeDefined();
+    expect(prisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ phoneNumber: null }) }),
+    );
+  });
+
+  it('stores a provided phone number permanently, normalized, with no OTP ever sent for it', async () => {
+    const prisma = makePrisma();
+    prisma.user.findUnique = vi.fn().mockResolvedValue(null);
+    prisma.user.create = vi.fn().mockResolvedValue({
+      id: 'user_4', email: 'withphone@example.com', firstName: null, lastName: null, phoneNumber: '+919876543210',
+      emailVerified: null, role: 'customer', isActive: true, lastLogin: null,
+      createdAt: new Date(), updatedAt: new Date(), password: '$2b$10$hash',
+    });
+    const service = new IdentityService(prisma, makeEmailService(), makeAdminAuditLog());
+
+    await service.register('withphone@example.com', 'Password1!', 'New', 'User', '9876543210');
+
+    expect(prisma.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ phoneNumber: '+919876543210' }) }),
+    );
+    // No mobile-OTP verification token of any kind is ever created.
+    expect(prisma.verificationToken.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: 'mobile_otp' }) }),
+    );
   });
 });

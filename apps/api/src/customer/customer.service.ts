@@ -1,8 +1,13 @@
-import { Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+import { EmailService } from '../email/email.service';
+import { assertCanSend, assertDelivered, issueOtp, verifyAndConsumeOtp } from '../identity/otp.utils';
 
 const BCRYPT_ROUNDS = 10;
+/** The email-address-change OTP expires in 5 minutes, same as every other OTP purpose. */
+const CHANGE_OTP_EXPIRY_MINUTES = 5;
 
 /**
  * CustomerService
@@ -11,10 +16,19 @@ const BCRYPT_ROUNDS = 10;
  * - Customer profile data (name, email, phone)
  * - Delivery addresses for Indian customers
  * - Profile updates with verification
+ * - OTP-gated email address changes (see requestEmailUpdate/verifyEmailUpdate):
+ *   the live email on the User row is never touched until the OTP sent to the
+ *   NEW address is verified - a PendingEmailChange row holds the requested
+ *   value until then. The mobile number has no verification of any kind - it
+ *   is a plain, permanently-stored contact field, directly editable via
+ *   updateProfile below, exactly like firstName/lastName.
  */
 @Injectable()
 export class CustomerService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   /**
    * Get customer profile
@@ -43,7 +57,11 @@ export class CustomerService {
   }
 
   /**
-   * Update customer profile
+   * Update customer profile: name, and the mobile number (a plain,
+   * permanently-stored contact field with no verification of any kind - it
+   * is just lightly format-checked, never OTP-gated). Email remains a
+   * verified, security-sensitive identifier and can only be changed through
+   * the dedicated OTP-gated flow below (requestEmailUpdate/verifyEmailUpdate).
    * @param userId - User ID
    * @param data - Profile data to update
    * @returns Updated profile
@@ -64,12 +82,24 @@ export class CustomerService {
       throw new NotFoundException('User not found');
     }
 
+    let normalizedPhone = user.phoneNumber;
+    if (data.phoneNumber !== undefined) {
+      if (data.phoneNumber.trim()) {
+        normalizedPhone = this.normalizePhone(data.phoneNumber);
+        if (!this.isValidPhone(normalizedPhone)) {
+          throw new BadRequestException('Enter a valid mobile number with country code');
+        }
+      } else {
+        normalizedPhone = null;
+      }
+    }
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
         firstName: data.firstName ?? user.firstName,
         lastName: data.lastName ?? user.lastName,
-        phoneNumber: data.phoneNumber ?? user.phoneNumber,
+        phoneNumber: normalizedPhone,
       },
       select: {
         id: true,
@@ -82,6 +112,107 @@ export class CustomerService {
     });
 
     return updated;
+  }
+
+  // ========================================================================
+  // EMAIL ADDRESS CHANGE (OTP-gated, pending-value indirection)
+  // ========================================================================
+
+  /** Step 1: request an email address change - mirrors requestPhoneUpdate exactly. */
+  async requestEmailUpdate(userId: string, newEmail: string): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const normalized = newEmail.trim().toLowerCase();
+    if (!this.isValidEmail(normalized)) {
+      throw new BadRequestException('Enter a valid email address');
+    }
+    if (normalized === user.email) {
+      throw new BadRequestException('This is already your email address.');
+    }
+
+    const conflict = await this.prisma.user.findUnique({ where: { email: normalized } });
+    if (conflict) {
+      throw new ConflictException('This email address is already associated with another account.');
+    }
+
+    await assertCanSend(this.prisma, normalized, 'email_change_otp');
+    const { otp, expiresAt } = await issueOtp(this.prisma, {
+      destination: normalized,
+      purpose: 'email_change_otp',
+      userId,
+      expiryMinutes: CHANGE_OTP_EXPIRY_MINUTES,
+    });
+
+    await this.prisma.pendingEmailChange.upsert({
+      where: { userId },
+      update: { newEmail: normalized, expiresAt, verifiedAt: null },
+      create: { userId, newEmail: normalized, expiresAt },
+    });
+
+    const delivered = await this.emailService.sendEmailOtpEmail({
+      toEmail: normalized,
+      customerName: user.firstName || normalized,
+      otp,
+      expiryMinutes: CHANGE_OTP_EXPIRY_MINUTES,
+    }).catch(() => false);
+    assertDelivered(delivered, 'email_change_otp', normalized);
+
+    return { message: 'Verification code sent to your new email address.' };
+  }
+
+  /**
+   * Step 2: verify the OTP sent to the pending new email. Email doubles as
+   * the login identifier, so on success every other active session for this
+   * account is invalidated (a fresh session is issued for the device that
+   * just completed verification) and the OLD email address is notified of
+   * the change - a stronger response than the mobile-number case, since a
+   * hijacked email change is a full account-takeover vector.
+   */
+  async verifyEmailUpdate(userId: string, otp: string): Promise<{ message: string; sessionToken: string }> {
+    const pending = await this.prisma.pendingEmailChange.findUnique({ where: { userId } });
+    if (!pending) {
+      throw new BadRequestException('No pending email change found. Please start again.');
+    }
+    if (pending.expiresAt < new Date()) {
+      await this.prisma.pendingEmailChange.delete({ where: { userId } }).catch(() => undefined);
+      throw new BadRequestException('Your email change request has expired. Please start again.');
+    }
+
+    await verifyAndConsumeOtp(this.prisma, { destination: pending.newEmail, purpose: 'email_change_otp', otp });
+
+    const oldUser = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!oldUser) {
+      throw new NotFoundException('User not found');
+    }
+    const oldEmail = oldUser.email;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const conflict = await tx.user.findUnique({ where: { email: pending.newEmail } });
+      if (conflict) {
+        throw new ConflictException('This email address is already associated with another account.');
+      }
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { email: pending.newEmail, emailVerified: new Date() },
+      });
+      await tx.pendingEmailChange.delete({ where: { userId } });
+      await tx.session.deleteMany({ where: { userId } });
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await tx.session.create({ data: { userId, token, expiresAt } });
+      return { user, token };
+    });
+
+    this.emailService.sendEmailChangedNotification({
+      toEmail: oldEmail,
+      customerName: updated.user.firstName || oldEmail,
+      newEmail: updated.user.email,
+    }).catch(() => undefined);
+
+    return { message: 'Email address updated and verified successfully.', sessionToken: updated.token };
   }
 
   /**
@@ -319,6 +450,25 @@ export class CustomerService {
   // ========================================================================
   // Private helpers
   // ========================================================================
+
+  /** Light normalization: bare 10-digit Indian numbers get a +91 prefix; anything already prefixed is left as-is. */
+  private normalizePhone(phone: string): string {
+    const trimmed = phone.trim();
+    const digitsOnly = trimmed.replace(/[^\d]/g, '');
+    if (!trimmed.startsWith('+') && digitsOnly.length === 10) {
+      return `+91${digitsOnly}`;
+    }
+    return trimmed;
+  }
+
+  /** Loose E.164-style check after normalization: a leading '+' and 8-15 digits. */
+  private isValidPhone(normalizedPhone: string): boolean {
+    return /^\+[1-9]\d{7,14}$/.test(normalizedPhone);
+  }
+
+  private isValidEmail(email: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
 
   private validateAddress(data: any) {
     // "label" is presented to customers as an optional nickname (e.g. "Home, Office, etc.")

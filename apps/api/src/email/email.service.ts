@@ -192,6 +192,49 @@ export class EmailService {
   }
 
   // =========================================================================
+  // Account change notifications (sent to the OLD/unchanged channel so the
+  // customer finds out even if the change wasn't them)
+  // =========================================================================
+
+  /** Sent to the OLD email address immediately after a customer's email address is changed. */
+  async sendEmailChangedNotification(data: { toEmail: string; customerName: string; newEmail: string }): Promise<boolean> {
+    const subject = 'Your PREMAL KAIZEN account email was changed';
+    const html = emailShell(
+      section(`
+        ${heroText('Account Email Changed', '🔐')}
+        ${greeting(data.customerName)}
+        <p style="margin:0 0 8px;color:#555555;">
+          The email address on your PREMAL KAIZEN account was just changed to <strong>${esc(data.newEmail)}</strong>.
+        </p>
+        ${infoBox(`<strong>Didn't make this change?</strong> Contact support immediately - your account may be compromised.`, 'yellow')}
+      `),
+      this.storefrontUrl,
+      this.instagramUrl,
+    );
+    const text = `The email address on your PREMAL KAIZEN account was just changed to ${data.newEmail}. If you didn't make this change, contact support immediately.`;
+    return this.send(data.toEmail, subject, html, text);
+  }
+
+  /** Sent to the account's email after the mobile number on file is changed. */
+  async sendPhoneChangedNotification(data: { toEmail: string; customerName: string; newPhone: string }): Promise<boolean> {
+    const subject = 'Your PREMAL KAIZEN account mobile number was changed';
+    const html = emailShell(
+      section(`
+        ${heroText('Mobile Number Changed', '🔐')}
+        ${greeting(data.customerName)}
+        <p style="margin:0 0 8px;color:#555555;">
+          The mobile number on your PREMAL KAIZEN account was just changed to <strong>${esc(data.newPhone)}</strong>.
+        </p>
+        ${infoBox(`<strong>Didn't make this change?</strong> Contact support immediately - your account may be compromised.`, 'yellow')}
+      `),
+      this.storefrontUrl,
+      this.instagramUrl,
+    );
+    const text = `The mobile number on your PREMAL KAIZEN account was just changed to ${data.newPhone}. If you didn't make this change, contact support immediately.`;
+    return this.send(data.toEmail, subject, html, text);
+  }
+
+  // =========================================================================
   // Password reset email
   // =========================================================================
 

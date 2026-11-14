@@ -53,6 +53,8 @@ model User {
   wishlist      WishlistItem[]
   sessions      Session[]
   reviews       Review[]
+  pendingPhoneChange PendingPhoneChange?
+  pendingEmailChange PendingEmailChange?
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -77,15 +79,83 @@ model Session {
 
 model VerificationToken {
   id        String    @id @default(cuid())
-  email     String
+  email     String    // destination identifier: an email address OR a normalized phone number, depending on `type`
   token     String    @unique
-  type      String    // 'email_verification' | 'password_reset' | 'email_otp' | 'mobile_otp' | 'login_otp'
+  type      String    // 'email_verification' | 'password_reset' | 'email_otp' | 'mobile_otp' | 'login_otp' | 'login_mobile_otp' | 'phone_change_otp' | 'email_change_otp'
+  userId    String?   // the account this OTP belongs to, when known at issue time (added for OTP hardening - older rows may be null)
   expiresAt DateTime
   attempts  Int       @default(0) // incorrect-code attempts for OTP-type rows; the row is invalidated once this hits the configured max
 
   createdAt DateTime  @default(now())
 
   @@index([email])
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// One row per (destination, purpose) currently locked out after too many incorrect
+// OTP attempts. A lockout blocks BOTH new sends and new verify attempts for that
+// destination+purpose until `lockedUntil` passes - this closes the brute-force gap
+// where deleting the exhausted token alone would let an attacker immediately request
+// a fresh OTP and get 5 more guesses with no cooldown.
+model OtpLockout {
+  id          String   @id @default(cuid())
+  destination String
+  purpose     String
+  lockedUntil DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([destination, purpose])
+  @@index([lockedUntil])
+}
+
+// Append-only send log used only to enforce "max N OTP sends per hour per
+// destination" - rows are never updated, only counted within a rolling window and
+// pruned once stale. Kept separate from VerificationToken because that table's
+// "one active OTP per destination+purpose" invariant means old rows there get
+// deleted/replaced on every resend, which would make historical counting impossible.
+model OtpSendLog {
+  id          String   @id @default(cuid())
+  destination String
+  purpose     String
+  createdAt   DateTime @default(now())
+
+  @@index([destination, purpose, createdAt])
+}
+
+// A requested-but-not-yet-verified mobile number change for an existing, authenticated
+// user. The live User.phoneNumber/phoneVerified are never touched until the OTP sent to
+// newPhone is verified - this is exactly the "pending change" indirection the mobile
+// number change flow requires. One row per user (a new request overwrites any prior one).
+model PendingPhoneChange {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  newPhone   String
+  expiresAt  DateTime
+  verifiedAt DateTime?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([expiresAt])
+}
+
+// Mirrors PendingPhoneChange for email address changes - the live User.email/
+// emailVerified are never touched until the OTP sent to newEmail is verified.
+model PendingEmailChange {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  newEmail   String
+  expiresAt  DateTime
+  verifiedAt DateTime?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
   @@index([expiresAt])
 }
 

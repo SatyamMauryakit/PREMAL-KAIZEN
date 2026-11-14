@@ -45,6 +45,8 @@ function makePrisma(user: any, overrides: any = {}) {
       update: vi.fn().mockResolvedValue({}),
       create: vi.fn().mockImplementation(({ data }: any) => ({ id: 'tok_1', attempts: 0, ...data })),
     },
+    otpLockout: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+    otpSendLog: { count: vi.fn().mockResolvedValue(0), create: vi.fn().mockResolvedValue({}) },
     ...overrides,
   } as any;
 }
@@ -102,6 +104,16 @@ describe('IdentityService.login - step 1 (credentials)', () => {
     expect(emailService.sendEmailOtpEmail).toHaveBeenCalledWith(
       expect.objectContaining({ toEmail: 'user@example.com', expiryMinutes: 5 }),
     );
+  });
+
+  it('a failed email delivery for the login OTP surfaces a real error instead of claiming success', async () => {
+    const user = await makeUser({ emailVerified: new Date() });
+    const prisma = makePrisma(user);
+    const emailService = { sendWelcomeEmail: vi.fn(), sendEmailOtpEmail: vi.fn().mockResolvedValue(false) } as any; // provider-reported failure
+    const service = new IdentityService(prisma, emailService, { log: vi.fn(), list: vi.fn() } as any);
+
+    await expect(service.login('user@example.com', 'Password1!')).rejects.toThrow(/couldn't send/i);
+    expect(prisma.session.create).not.toHaveBeenCalled();
   });
 
   it('admin accounts bypass the login-OTP step entirely and get a session directly', async () => {

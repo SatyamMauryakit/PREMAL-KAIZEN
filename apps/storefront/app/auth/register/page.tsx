@@ -52,11 +52,7 @@ export default function RegisterPage() {
       await register(formData.email, formData.password, formData.firstName, formData.lastName, formData.phoneNumber || undefined);
       setSuccess('Account created! We\'ve sent a verification code to your email.');
       setTimeout(() => {
-        const next = `/auth/verify-email?email=${encodeURIComponent(formData.email)}`;
-        const withPhone = formData.phoneNumber
-          ? `${next}&phone=${encodeURIComponent(formData.phoneNumber)}`
-          : next;
-        router.push(withPhone);
+        router.push(`/auth/verify-email?email=${encodeURIComponent(formData.email)}`);
       }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
@@ -147,7 +143,7 @@ export default function RegisterPage() {
                 placeholder="9876543210"
                 disabled={isLoading}
               />
-              <p className="text-xs text-gray-500 mt-1">Add it now to verify your mobile number via SMS.</p>
+              <p className="text-xs text-gray-500 mt-1">Used for order updates only.</p>
             </div>
 
             <div>

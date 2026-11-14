@@ -54,7 +54,16 @@ import { ReviewsModule } from './reviews/reviews.module';
     // fine for a single API instance; once there are multiple replicas, this needs a
     // shared store (e.g. @nest-lab/throttler-storage-redis) or each replica will count
     // independently and the effective limit becomes limit * replica count.
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 120 }]),
+    // 'otp' is a second, additional named throttler (not a replacement for
+    // 'default') applied via @Throttle() only on OTP send/verify/login routes -
+    // a per-IP cap of 10 requests per 15 minutes, independent of and on top of
+    // each route's own per-minute limit. Combined with the per-destination
+    // cooldown/hourly-cap/lockout enforced in otp.utils.ts, OTP abuse is capped
+    // by both IP and destination, never by IP alone.
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60000, limit: 120 },
+      { name: 'otp', ttl: 900000, limit: 10 },
+    ]),
     PrismaModule,
     HealthModule,
     ProductsModule,

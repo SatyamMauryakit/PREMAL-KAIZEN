@@ -32,10 +32,20 @@ export interface AuthContextType {
   verifyEmail: (token: string) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
+  /** Mobile number is a plain, permanently-stored contact field with no verification - update it here, same as the name fields. */
   updateProfile: (data: { firstName?: string; lastName?: string; phoneNumber?: string }) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  /**
+   * Registration email OTP. Rejects with a clear error if the server
+   * couldn't confirm delivery (never silently claims success). Email
+   * verification is the only activation step - verifying logs the customer
+   * in immediately.
+   */
   sendOtp: (email: string) => Promise<void>;
   verifyOtp: (email: string, otp: string) => Promise<void>;
+  /** Account settings: change email address (OTP-gated, two-step). Issues a fresh session on success. */
+  requestEmailUpdate: (email: string) => Promise<void>;
+  verifyEmailUpdate: (otp: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -229,9 +239,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Could not send verification code');
+      // The backend throws (and this surfaces as a non-2xx response) whenever
+      // delivery couldn't be confirmed - never silently treated as "sent".
+      throw new Error(data.message || 'Could not send verification code');
     }
   };
 
@@ -241,17 +253,52 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp }),
     });
+    const data = await response.json();
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Verification failed');
+      throw new Error(data.message || 'Verification failed');
     }
-    // Refresh user state to pick up the new emailVerified timestamp
+
+    // Email verification is the only activation step - a session is always
+    // issued on success, logging the customer in immediately.
+    setUser(data.user);
+    setSessionToken(data.sessionToken);
+    localStorage.setItem('sessionToken', data.sessionToken);
+  };
+
+  const requestEmailUpdate = async (email: string) => {
+    const response = await fetch(`${API_BASE}/api/customer/email/request-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      body: JSON.stringify({ email }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Could not send verification code');
+    }
+  };
+
+  const verifyEmailUpdate = async (otp: string) => {
+    const response = await fetch(`${API_BASE}/api/customer/email/verify-update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      body: JSON.stringify({ otp }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Verification failed');
+    }
+    // The backend invalidates every other session and issues a fresh one for
+    // this device - swap to it so the current browser stays logged in.
+    if (data.sessionToken) {
+      setSessionToken(data.sessionToken);
+      localStorage.setItem('sessionToken', data.sessionToken);
+    }
     const me = await fetch(`${API_BASE}/api/auth/me`, {
-      headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      headers: data.sessionToken ? { Authorization: `Bearer ${data.sessionToken}` } : {},
     });
     if (me.ok) {
-      const data = await me.json();
-      setUser(data.user);
+      const meData = await me.json();
+      setUser(meData.user);
     }
   };
 
@@ -322,6 +369,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         changePassword,
         sendOtp,
         verifyOtp,
+        requestEmailUpdate,
+        verifyEmailUpdate,
       }}
     >
       {children}

@@ -1,5 +1,14 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
+// crypto.randomUUID() only exists in secure contexts (HTTPS or localhost) - falls
+// back to a non-crypto unique id so this still works over plain HTTP.
+export function generateClientId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export interface ProductResponse {
   id: string;
   name: string;

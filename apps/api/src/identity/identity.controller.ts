@@ -20,7 +20,7 @@ export class IdentityController {
    * POST /api/auth/register
    * Register new customer
    */
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
   @Post('register')
   async register(
     @Body() body: { email: string; password: string; firstName?: string; lastName?: string; phoneNumber?: string },
@@ -122,7 +122,7 @@ export class IdentityController {
    * issued by POST /login/verify-otp below (or immediately for admin
    * accounts, which are exempt from this step - see IdentityService.login).
    */
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 10, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
   @Post('login')
   async login(@Body() body: { email: string; password: string }, @Res() res: Response) {
     if (!body.email || !body.password) {
@@ -132,7 +132,12 @@ export class IdentityController {
     const result = await this.identityService.login(body.email, body.password);
 
     if ('requiresOtp' in result) {
-      return res.json({ success: true, requiresOtp: true, email: result.email, message: result.message });
+      return res.json({
+        success: true,
+        requiresOtp: true,
+        email: result.email,
+        message: result.message,
+      });
     }
 
     // Admin accounts only (see IdentityService.login) - session issued directly.
@@ -157,7 +162,7 @@ export class IdentityController {
    * ever issue a session/cookie for a customer account - a correct password
    * alone (POST /login above) never does.
    */
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 10, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
   @Post('login/verify-otp')
   async verifyLoginOtp(@Body() body: { email: string; otp: string }, @Res() res: Response) {
     if (!body.email || !body.otp) {
@@ -187,7 +192,7 @@ export class IdentityController {
    * when a login OTP is already pending for this email (see
    * IdentityService.resendLoginOtp) - never a password-free way to trigger a send.
    */
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
   @Post('login/resend-otp')
   async resendLoginOtp(@Body() body: { email: string }, @Res() res: Response) {
     if (!body.email) {
@@ -310,7 +315,7 @@ export class IdentityController {
    * Rate-limited: 5 requests per minute per IP; the service also enforces a
    * per-email cooldown of 60 seconds between consecutive sends.
    */
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 5, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
   @Post('send-otp')
   async sendOtp(@Body() body: { email: string }, @Res() res: Response) {
     if (!body.email) {
@@ -322,44 +327,32 @@ export class IdentityController {
 
   /**
    * POST /api/auth/verify-otp
-   * Verify a 6-digit email OTP. Rate-limited to prevent brute-force.
+   * Verify a 6-digit email OTP. Rate-limited to prevent brute-force. Email
+   * verification is the only activation step a customer account needs, so a
+   * session is issued immediately - the storefront logs the customer in and
+   * redirects Home without a separate manual login.
    */
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 10, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
   @Post('verify-otp')
   async verifyOtp(@Body() body: { email: string; otp: string }, @Res() res: Response) {
     if (!body.email || !body.otp) {
       throw new BadRequestException('email and otp are required');
     }
     const result = await this.identityService.verifyEmailOtp(body.email, body.otp);
-    return res.json({ success: true, message: result.message });
-  }
 
-  /**
-   * POST /api/auth/send-mobile-otp
-   * Request a new mobile verification OTP (or re-send one). A safe no-op until
-   * a real SMS provider is configured (see SmsService) - never fails loudly.
-   */
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @Post('send-mobile-otp')
-  async sendMobileOtp(@Body() body: { phoneNumber: string }, @Res() res: Response) {
-    if (!body.phoneNumber) {
-      throw new BadRequestException('Phone number is required');
-    }
-    const result = await this.identityService.sendMobileOtp(body.phoneNumber);
-    return res.json({ success: true, message: result.message });
-  }
+    res.cookie('sessionToken', result.sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
 
-  /**
-   * POST /api/auth/verify-mobile-otp
-   * Verify a 6-digit mobile OTP. Rate-limited to prevent brute-force.
-   */
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  @Post('verify-mobile-otp')
-  async verifyMobileOtp(@Body() body: { phoneNumber: string; otp: string }, @Res() res: Response) {
-    if (!body.phoneNumber || !body.otp) {
-      throw new BadRequestException('phoneNumber and otp are required');
-    }
-    const result = await this.identityService.verifyMobileOtp(body.phoneNumber, body.otp);
-    return res.json({ success: true, message: result.message });
+    return res.json({
+      success: true,
+      message: result.message,
+      sessionReady: true,
+      user: result.user,
+      sessionToken: result.sessionToken,
+    });
   }
 }
