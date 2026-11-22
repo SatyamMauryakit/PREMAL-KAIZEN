@@ -458,7 +458,7 @@ aws s3 cp s3://$BUCKET/deploy-artifacts/source.tar.gz . && tar xzf source.tar.gz
 ```bash
 cd /opt/premal-kaizen/app/src
 docker build -f apps/api/Dockerfile --build-arg DATABASE_PROVIDER=postgresql -t premal-api:v2 .
-docker build -f apps/storefront/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://<PUBLIC_IP> -t premal-storefront:v2 .
+docker build -f apps/storefront/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://<PUBLIC_IP> --build-arg NEXT_PUBLIC_SITE_URL=https://<PUBLIC_IP> -t premal-storefront:v2 .
 docker build -f apps/admin/Dockerfile \
   --build-arg NEXT_PUBLIC_API_URL=https://<PUBLIC_IP> \
   --build-arg NEXT_PUBLIC_STOREFRONT_URL=https://<PUBLIC_IP> -t premal-admin:v2 .
@@ -617,7 +617,7 @@ admin.example.com {
 4. Rebuild the frontends with the new URLs (they are baked in at build time):
 
 ```bash
-docker build -f apps/storefront/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://example.com -t premal-storefront:v2 .
+docker build -f apps/storefront/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://example.com --build-arg NEXT_PUBLIC_SITE_URL=https://example.com -t premal-storefront:v2 .
 docker build -f apps/admin/Dockerfile \
   --build-arg NEXT_PUBLIC_API_URL=https://example.com \
   --build-arg NEXT_PUBLIC_STOREFRONT_URL=https://example.com -t premal-admin:v2 .
@@ -639,6 +639,8 @@ docker build -f apps/admin/Dockerfile \
 | Everyone got 429 Too Many Requests | Behind Caddy all clients looked like `127.0.0.1`, so they shared one rate-limit bucket | `app.set('trust proxy', 'loopback')` in `apps/api/src/main.ts` |
 | Products, banners and health checks returned 429 after about 10 requests | The `otp` throttler (10 per 15 min) applied to every route, not just OTP routes | `skipIf` on the `otp` throttler so only `@Throttle({ otp })` routes count (`apps/api/src/app.module.ts`) |
 | API container showed `unhealthy` | The healthcheck itself was being rate limited | Same fix as above |
+| Canonical links, Open Graph, `sitemap.xml` and `robots.txt` pointed to `http://localhost:3000` | `NEXT_PUBLIC_SITE_URL` was never set at build time | New build arg `NEXT_PUBLIC_SITE_URL` in `apps/storefront/Dockerfile`; set it to the public URL when building |
+| No browser security headers on the storefront and admin | Not set by Next.js or Caddy | `header` block in the Caddyfile (HSTS, nosniff, X-Frame-Options, Referrer-Policy; `X-Powered-By` removed) |
 | Banner images broken | Banners use `next/image` and the S3 host was not in `remotePatterns` | Added the S3 host (`products/**`) in `apps/storefront/next.config.ts` |
 | Admin sign-up open to anyone | `admin/bootstrap` is public until an admin exists | Caddy restricts it to the owner IP |
 

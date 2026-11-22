@@ -31,6 +31,9 @@ FROM deps AS build
 COPY . .
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+# Public site URL for canonical links, Open Graph, sitemap.xml and robots.txt (lib/metadata.ts).
+ARG NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 # Only this build's `next build` runs in standalone mode - see next.config.ts for why
 # it's gated (Windows-dev-build EPERM on symlinks); Linux has no such restriction.
 ENV NEXT_OUTPUT_STANDALONE=true
@@ -62,6 +65,8 @@ ENV HOSTNAME=0.0.0.0
 # genuinely existing and the client-side (browser) calls working fine.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
 
 # Standalone output structure confirmed empirically inside this same Linux build (see
 # phase report) - Next's file tracer preserves the monorepo path from the workspace
