@@ -16,6 +16,10 @@ async function bootstrap() {
   // computes over the raw request bytes, not a re-serialized JSON object.
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
+  // Behind a same-host reverse proxy (Caddy) every client otherwise appears as 127.0.0.1,
+  // so the rate limiter puts all visitors into one shared bucket and returns 429s.
+  app.set('trust proxy', 'loopback');
+
   app.use(cookieParser());
   app.use(requestLoggerMiddleware);
 
