@@ -98,3 +98,6 @@ deploy-compose/*.tar.gz
 
 # generated Prisma client for the postgres schema (platform-specific binaries)
 apps/api/prisma-postgres/generated-client/
+
+# real AWS resource IDs (repo is public)
+deploy-aws/RESOURCES.local.md
