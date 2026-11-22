@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { ExecutionContext, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
@@ -63,7 +63,18 @@ import { BannersModule } from './banners/banners.module';
     // by both IP and destination, never by IP alone.
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60000, limit: 120 },
-      { name: 'otp', ttl: 900000, limit: 10 },
+      // A named throttler applies to every route unless skipped, so without skipIf this
+      // 10-per-15-minutes cap hit all traffic (products, banners, health) and returned 429s.
+      // Only routes that opt in with @Throttle({ otp: ... }) are counted.
+      {
+        name: 'otp',
+        ttl: 900000,
+        limit: 10,
+        skipIf: (context: ExecutionContext) =>
+          ![context.getHandler(), context.getClass()].some(
+            (target) => Reflect.getMetadata('THROTTLER:LIMITotp', target) !== undefined,
+          ),
+      },
     ]),
     PrismaModule,
     HealthModule,

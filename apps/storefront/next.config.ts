@@ -26,6 +26,13 @@ const nextConfig: NextConfig = {
         hostname: apiHost.hostname,
         port: apiHost.port || undefined,
       },
+      // Uploaded images (banners use next/image) live in S3 under /products/ when
+      // STORAGE_DRIVER=s3; without this entry /_next/image rejects them and they render broken.
+      {
+        protocol: 'https',
+        hostname: '*.s3.ap-south-1.amazonaws.com',
+        pathname: '/products/**',
+      },
     ],
   },
   env: {
