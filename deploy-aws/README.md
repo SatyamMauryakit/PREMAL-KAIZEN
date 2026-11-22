@@ -80,7 +80,7 @@ Design choices:
 | EC2 instance | `premal-kaizen-v2`, `t3a.small` | Ubuntu 24.04 (Canonical AMI), AZ `ap-south-1a`, default VPC, IMDSv2 required, no key pair |
 | EBS volume | 25 GB gp3, encrypted | Root volume, deleted on termination |
 | Elastic IP | `<PUBLIC_IP>` | Associated with the instance. Free while attached to a running instance (the public IPv4 charge applies) |
-| Security group | `premal-kaizen-v2-sg` | 80 and 443 from anywhere, 3001 from the owner IP only. No SSH |
+| Security group | `premal-kaizen-v2-sg` | 80 and 443 from anywhere. No SSH |
 | IAM role | `premal-kaizen-v2-ec2-role` | Managed `AmazonSSMManagedInstanceCore` plus inline policy `premal-v2-s3` |
 | Instance profile | `premal-kaizen-v2-ec2-profile` | Wraps the role |
 | S3 bucket | `premal-kaizen-v2-<ACCOUNT_ID>` | SSE-S3 (AES256), versioning off, tagged `Project=premal-kaizen-v2` |
@@ -98,7 +98,7 @@ Security group inbound rules:
 |---|---|---|
 | 80 | 0.0.0.0/0 | Redirects to HTTPS |
 | 443 | 0.0.0.0/0 | Storefront and API over HTTPS |
-| 3001 | `<OWNER_IP>/32` | Admin panel over HTTPS |
+| 3001 | closed | Was the admin port while the site was IP-only. Admin now lives at `admin.<domain>` on 443 |
 | 22 | not open | No SSH. Use SSM |
 
 Outbound: allow all (default).
@@ -565,6 +565,14 @@ remote command's output through `tr -cd '\11\12\40-\176'`.
 
 ## 14. Adding a domain (GoDaddy)
 
+**Status: done on 2026-11-22 for `premalkaizen.in`.** The apex serves the storefront and API, `www` redirects
+to the apex, and `admin.premalkaizen.in` serves the admin panel. Certificates are real Let's Encrypt
+certificates that Caddy issues and renews by itself (valid 90 days, renewed automatically). The bare IP now
+only redirects to the domain. On the instance the pre-domain files were kept as
+`/opt/premal-kaizen/deploy/Caddyfile.ip-backup` and `.env.ip-backup`.
+
+The steps below are what was done, written generically so they can be repeated for another domain.
+
 1. In GoDaddy DNS for the domain add:
 
 | Type | Host | Value | TTL |
@@ -656,7 +664,7 @@ the only reason to size up temporarily.
 
 - [ ] Rotate or delete the IAM access key used for the setup (it was shared in a chat) and use a least-privilege user afterwards.
 - [ ] Add real Razorpay keys to `.env` (payments are off while they are empty).
-- [ ] Add a domain and real certificates (section 14). The current certificate is self-signed.
+- [x] Domain and real certificates (section 14), done 2026-11-22.
 - [ ] Optional: daily EBS snapshots, S3 versioning, CloudFront in front of images.
 - [ ] Optional: copy backups to a second region or account.
 - [ ] The storefront's server-side requests reach the API through Caddy from one IP, so they share one rate-limit bucket (120 per minute). If traffic grows, raise the limit or let the storefront call the API on localhost.
