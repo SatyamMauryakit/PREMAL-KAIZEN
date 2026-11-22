@@ -333,7 +333,9 @@ access key after setup, and prefer a narrower policy for day-to-day work.
 | `APP_BASE_URL` | Public storefront URL, used in emails and invoices |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated exact origins allowed to call the API (storefront and admin origins) |
 | `S3_BUCKET` | Image bucket name |
-| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | Payments. Empty means online payments are off (cash on delivery still works) |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | Payments. Empty means online payments are off (cash on delivery still works). `rzp_live_` keys charge real money |
+| `RAZORPAY_WEBHOOK_SECRET` | Secret used to verify Razorpay webhooks. Register `https://<domain>/api/payments/razorpay/webhook` in the Razorpay dashboard (Settings, Webhooks) with the same secret |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Optional SMS for mobile OTP. The SID must be the Account SID (starts with `AC`), not an API key SID (`SK`) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Email (login OTP, order mails). Gmail needs an app password |
 | `EMAIL_FROM`, `CONTACT_NOTIFICATION_EMAIL` | Sender and contact-form recipient |
 
