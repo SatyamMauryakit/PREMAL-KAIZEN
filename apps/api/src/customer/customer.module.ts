@@ -5,8 +5,10 @@ import { CustomerAdminService } from './customer-admin.service';
 import { CustomerAdminController } from './customer-admin.controller';
 import { CartService } from './cart.service';
 import { CartAdminController } from './cart-admin.controller';
+import { EmailModule } from '../email/email.module';
 
 @Module({
+  imports: [EmailModule],
   providers: [CustomerService, CustomerAdminService, CartService],
   controllers: [CustomerController, CustomerAdminController, CartAdminController],
   exports: [CustomerService, CustomerAdminService, CartService],

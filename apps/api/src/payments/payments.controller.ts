@@ -3,6 +3,7 @@ import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import { VerifyPaymentDto } from './dto/verify-payment.dto';
 
 @Controller('api/payments/razorpay')
 export class PaymentsController {
@@ -14,7 +15,7 @@ export class PaymentsController {
   @UseGuards(AuthGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Post('verify')
-  async verify(@Body() body: any, @Req() req: any) {
+  async verify(@Body() body: VerifyPaymentDto, @Req() req: any) {
     return this.paymentsService.verifyPayment(req.user.id, body);
   }
 

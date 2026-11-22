@@ -3,23 +3,25 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useAuth } from '@/lib/auth-context';
+import OtpInput from '@/components/auth/OtpInput';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+type Status = 'idle' | 'loading' | 'success' | 'error' | 'expired' | 'locked';
 
 function VerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { sendOtp, verifyOtp } = useAuth();
   const emailFromQuery = searchParams.get('email') || '';
-  const phoneFromQuery = searchParams.get('phone') || '';
   const blockedLogin = searchParams.get('blocked') === '1';
 
   const [email, setEmail] = useState(emailFromQuery);
   const [otp, setOtp] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [clearSignal, setClearSignal] = useState(0);
 
-  // Countdown timer for resend cooldown
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const t = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
@@ -28,8 +30,8 @@ function VerifyEmailContent() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !otp.trim()) {
-      setMessage('Please enter your email and the verification code.');
+    if (!email || otp.trim().length < 6) {
+      setMessage('Please enter your email and the 6-digit verification code.');
       setStatus('error');
       return;
     }
@@ -37,24 +39,18 @@ function VerifyEmailContent() {
     setStatus('loading');
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp: otp.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Verification failed');
+      await verifyOtp(email, otp.trim());
       setStatus('success');
-      if (phoneFromQuery) {
-        setMessage('Your email has been verified! Now let\'s verify your mobile number…');
-        setTimeout(() => router.push(`/auth/verify-mobile?phone=${encodeURIComponent(phoneFromQuery)}`), 2000);
-      } else {
-        setMessage('Your email has been verified! Redirecting to login…');
-        setTimeout(() => router.push('/auth/login'), 2000);
-      }
+      setMessage('Your email has been verified! Taking you home…');
+      setTimeout(() => router.push('/'), 1500);
     } catch (err) {
-      setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'Verification failed');
+      const msg = err instanceof Error ? err.message : 'Verification failed';
+      setMessage(msg);
+      setOtp('');
+      setClearSignal((c) => c + 1);
+      if (/expired/i.test(msg)) setStatus('expired');
+      else if (/too many/i.test(msg)) setStatus('locked');
+      else setStatus('error');
     }
   };
 
@@ -65,21 +61,17 @@ function VerifyEmailContent() {
     setStatus('loading');
     setMessage('');
     try {
-      const res = await fetch(`${API_BASE}/api/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Could not send code');
+      await sendOtp(email);
       setStatus('idle');
       setMessage('A new code has been sent to your email.');
       setResendCooldown(60);
     } catch (err) {
       setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'Could not resend code');
+      setMessage(err instanceof Error ? err.message : 'We couldn\'t send your OTP right now. Please try again.');
     }
   };
+
+  const isBusy = status === 'loading' || status === 'success';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-cream to-white flex items-center justify-center px-4">
@@ -95,7 +87,7 @@ function VerifyEmailContent() {
             <h1 className="text-2xl font-bold text-black mb-2">Verify Your Email</h1>
             {blockedLogin && (
               <p className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm mb-3">
-                You'll need to verify your email before you can log in.
+                You&apos;ll need to verify your email before you can log in.
               </p>
             )}
             <p className="text-gray-600 text-sm">
@@ -105,20 +97,23 @@ function VerifyEmailContent() {
           </div>
 
           {/* Status messages */}
-          {status === 'error' && message && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm">{message}</div>
+          {(status === 'error' || status === 'expired' || status === 'locked') && message && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm" role="alert">
+              {message}
+            </div>
           )}
           {status === 'success' && (
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6 text-sm">
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6 text-sm" role="status">
               ✅ {message}
             </div>
           )}
           {status === 'idle' && message && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg mb-6 text-sm">{message}</div>
+            <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg mb-6 text-sm" role="status">
+              {message}
+            </div>
           )}
 
           <form onSubmit={handleVerify} className="space-y-5">
-            {/* Email (editable in case they land here directly) */}
             {!emailFromQuery && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
@@ -133,27 +128,15 @@ function VerifyEmailContent() {
               </div>
             )}
 
-            {/* OTP input */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Verification Code</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="• • • • • •"
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black text-center text-3xl font-mono tracking-[0.4em] letter-spacing"
-                required
-                disabled={status === 'loading' || status === 'success'}
-              />
-              <p className="text-xs text-gray-500 mt-1 text-center">The code expires in 15 minutes.</p>
+              <label className="block text-sm font-medium text-gray-700 mb-2 text-center">Verification Code</label>
+              <OtpInput value={otp} onChange={setOtp} disabled={isBusy} clearSignal={clearSignal} autoFocus />
+              <p className="text-xs text-gray-500 mt-2 text-center">The code expires in 5 minutes.</p>
             </div>
 
             <button
               type="submit"
-              disabled={status === 'loading' || status === 'success' || otp.length < 6}
+              disabled={isBusy || otp.length < 6}
               className="w-full bg-black text-cream py-3 rounded-lg font-medium hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
             >
               {status === 'loading' ? 'Verifying…' : 'Verify Email'}
@@ -162,10 +145,10 @@ function VerifyEmailContent() {
 
           {/* Resend */}
           <div className="text-center mt-6">
-            <p className="text-sm text-gray-600 mb-2">Didn't receive a code?</p>
+            <p className="text-sm text-gray-600 mb-2">Didn&apos;t receive a code?</p>
             <button
               onClick={handleResend}
-              disabled={resendCooldown > 0 || status === 'loading' || status === 'success'}
+              disabled={resendCooldown > 0 || isBusy}
               className="text-sm font-medium text-black hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
             >
               {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}

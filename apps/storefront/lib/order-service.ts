@@ -26,6 +26,21 @@ export interface OrderAddress {
 
 export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'packed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'returned';
 export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'refunded';
+export type RefundStatus = 'pending' | 'processing' | 'refunded' | 'failed';
+export type CancellationReason = 'mistake' | 'better_product' | 'changed_mind' | 'wrong_size' | 'delivery_too_long' | 'other';
+
+// Mirrors the backend's CANCELLABLE_STATUSES (apps/api/src/orders/orders.service.ts) -
+// for the Cancel Order button's visibility only; the backend remains authoritative.
+export const CANCELLABLE_STATUSES: OrderStatus[] = ['pending', 'confirmed', 'processing', 'packed'];
+
+export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[] = [
+  { value: 'mistake', label: 'Ordered by mistake' },
+  { value: 'better_product', label: 'Found a better product' },
+  { value: 'changed_mind', label: 'Changed my mind' },
+  { value: 'wrong_size', label: 'Incorrect size or product' },
+  { value: 'delivery_too_long', label: 'Delivery taking too long' },
+  { value: 'other', label: 'Other reason' },
+];
 
 export interface Order {
   id: string;
@@ -47,6 +62,10 @@ export interface Order {
   updatedAt: string;
   estimatedDelivery?: string;
   notes?: string;
+  cancellationReason?: CancellationReason | null;
+  cancellationComment?: string | null;
+  cancelledAt?: string | null;
+  refundStatus?: RefundStatus | null;
 }
 
 export interface OrderTimeline {
@@ -152,6 +171,23 @@ export const orderService = {
   // completed payment first) - matches the same rule the order detail page uses.
   isInvoiceable(order: Pick<Order, 'paymentStatus' | 'paymentMethod'>): boolean {
     return order.paymentStatus === 'completed' || order.paymentMethod === 'cod';
+  },
+
+  // Customer self-service cancellation. The backend re-checks ownership and
+  // eligibility independently (403/409) - this call is never trusted to have
+  // already validated either.
+  async cancelOrder(orderId: string, reason: CancellationReason, comment: string | undefined, token: string): Promise<Order> {
+    const response = await fetch(`${API_BASE}/api/orders/${orderId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason, comment: comment || undefined }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(Array.isArray(body?.message) ? body.message[0] : body?.message || 'Failed to cancel order');
+    }
+    const data = await response.json();
+    return normalizeOrder(data);
   },
 };
 

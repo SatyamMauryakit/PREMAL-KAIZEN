@@ -6,6 +6,7 @@ import {
   adminProductsService,
   adminCategoriesService,
   adminUploadsService,
+  generateClientId,
   CategoryResponse,
   UploadedImage,
 } from '@/lib/products-service';
@@ -80,7 +81,7 @@ export default function CreateProductPage() {
           throw new Error(`"${file.name}" exceeds the 5MB size limit`);
         }
         const uploaded = await adminUploadsService.uploadImage(file, token);
-        setImages(prev => [...prev, { ...uploaded, id: crypto.randomUUID() }]);
+        setImages(prev => [...prev, { ...uploaded, id: generateClientId() }]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload image');

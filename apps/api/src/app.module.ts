@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { ExecutionContext, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +19,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { PaymentsModule } from './payments/payments.module';
 import { EmailModule } from './email/email.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { BannersModule } from './banners/banners.module';
 
 /**
  * AppModule
@@ -54,7 +55,27 @@ import { ReviewsModule } from './reviews/reviews.module';
     // fine for a single API instance; once there are multiple replicas, this needs a
     // shared store (e.g. @nest-lab/throttler-storage-redis) or each replica will count
     // independently and the effective limit becomes limit * replica count.
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 120 }]),
+    // 'otp' is a second, additional named throttler (not a replacement for
+    // 'default') applied via @Throttle() only on OTP send/verify/login routes -
+    // a per-IP cap of 10 requests per 15 minutes, independent of and on top of
+    // each route's own per-minute limit. Combined with the per-destination
+    // cooldown/hourly-cap/lockout enforced in otp.utils.ts, OTP abuse is capped
+    // by both IP and destination, never by IP alone.
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60000, limit: 120 },
+      // A named throttler applies to every route unless skipped, so without skipIf this
+      // 10-per-15-minutes cap hit all traffic (products, banners, health) and returned 429s.
+      // Only routes that opt in with @Throttle({ otp: ... }) are counted.
+      {
+        name: 'otp',
+        ttl: 900000,
+        limit: 10,
+        skipIf: (context: ExecutionContext) =>
+          ![context.getHandler(), context.getClass()].some(
+            (target) => Reflect.getMetadata('THROTTLER:LIMITotp', target) !== undefined,
+          ),
+      },
+    ]),
     PrismaModule,
     HealthModule,
     ProductsModule,
@@ -73,6 +94,7 @@ import { ReviewsModule } from './reviews/reviews.module';
     PaymentsModule,
     EmailModule,
     ReviewsModule,
+    BannersModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

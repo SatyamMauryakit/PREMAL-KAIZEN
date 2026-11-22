@@ -1,0 +1,80 @@
+# PostgreSQL - a StatefulSet (not a Deployment) because it owns persistent, ordered
+# identity storage; this is the one genuinely new piece of infrastructure versus the
+# old (stale, SQLite-based) manifests, since SQLite needed no separate database
+# service at all. Uses K3s's built-in "local-path" StorageClass (ships enabled by
+# default on every K3s install) for dynamic provisioning - no static hostPath PV/PVC
+# hand-wiring like the old kind-based manifests needed.
+#
+# Not publicly exposed: the Service below has no type (defaults to ClusterIP), so it
+# is only reachable from inside the cluster, at premal-postgres:5432 - matching
+# production's own posture of binding Postgres to 127.0.0.1 only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-postgres
+  namespace: premal-kaizen
+spec:
+  clusterIP: None # headless - StatefulSet pods get stable DNS (premal-postgres-0.premal-postgres)
+  selector:
+    app: premal-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: premal-postgres
+  namespace: premal-kaizen
+spec:
+  serviceName: premal-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: premal-postgres
+  template:
+    metadata:
+      labels:
+        app: premal-postgres
+    spec:
+      securityContext:
+        fsGroup: 999 # postgres:alpine's own postgres user/group
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_DB } }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata # subdirectory, not the mount root - avoids lost+found conflicts on some volume types
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

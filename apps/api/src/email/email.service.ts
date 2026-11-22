@@ -9,6 +9,17 @@ import {
   TemplateOrderItem, TemplateTotals, TemplateAddress,
 } from './email-templates';
 
+// Human-readable labels for CancelOrderDto's reason codes (apps/api/src/orders/dto/cancel-order.dto.ts) -
+// duplicated here rather than imported to keep the email module decoupled from the orders module's DTO.
+const CANCELLATION_REASON_LABELS: Record<string, string> = {
+  mistake: 'Ordered by mistake',
+  better_product: 'Found a better product',
+  changed_mind: 'Changed my mind',
+  wrong_size: 'Incorrect size or product',
+  delivery_too_long: 'Delivery taking too long',
+  other: 'Other reason',
+};
+
 export interface OrderEmailItem {
   name: string;
   quantity: number;
@@ -188,6 +199,49 @@ export class EmailService {
       this.instagramUrl,
     );
     const text = `Your PREMAL KAIZEN email verification code is: ${data.otp}\nThis code expires in ${data.expiryMinutes} minutes. Do not share it with anyone.`;
+    return this.send(data.toEmail, subject, html, text);
+  }
+
+  // =========================================================================
+  // Account change notifications (sent to the OLD/unchanged channel so the
+  // customer finds out even if the change wasn't them)
+  // =========================================================================
+
+  /** Sent to the OLD email address immediately after a customer's email address is changed. */
+  async sendEmailChangedNotification(data: { toEmail: string; customerName: string; newEmail: string }): Promise<boolean> {
+    const subject = 'Your PREMAL KAIZEN account email was changed';
+    const html = emailShell(
+      section(`
+        ${heroText('Account Email Changed', '🔐')}
+        ${greeting(data.customerName)}
+        <p style="margin:0 0 8px;color:#555555;">
+          The email address on your PREMAL KAIZEN account was just changed to <strong>${esc(data.newEmail)}</strong>.
+        </p>
+        ${infoBox(`<strong>Didn't make this change?</strong> Contact support immediately - your account may be compromised.`, 'yellow')}
+      `),
+      this.storefrontUrl,
+      this.instagramUrl,
+    );
+    const text = `The email address on your PREMAL KAIZEN account was just changed to ${data.newEmail}. If you didn't make this change, contact support immediately.`;
+    return this.send(data.toEmail, subject, html, text);
+  }
+
+  /** Sent to the account's email after the mobile number on file is changed. */
+  async sendPhoneChangedNotification(data: { toEmail: string; customerName: string; newPhone: string }): Promise<boolean> {
+    const subject = 'Your PREMAL KAIZEN account mobile number was changed';
+    const html = emailShell(
+      section(`
+        ${heroText('Mobile Number Changed', '🔐')}
+        ${greeting(data.customerName)}
+        <p style="margin:0 0 8px;color:#555555;">
+          The mobile number on your PREMAL KAIZEN account was just changed to <strong>${esc(data.newPhone)}</strong>.
+        </p>
+        ${infoBox(`<strong>Didn't make this change?</strong> Contact support immediately - your account may be compromised.`, 'yellow')}
+      `),
+      this.storefrontUrl,
+      this.instagramUrl,
+    );
+    const text = `The mobile number on your PREMAL KAIZEN account was just changed to ${data.newPhone}. If you didn't make this change, contact support immediately.`;
     return this.send(data.toEmail, subject, html, text);
   }
 
@@ -461,11 +515,14 @@ export class EmailService {
           ${orderBtn}`;
         break;
 
-      case 'status_cancelled':
+      case 'status_cancelled': {
+        const reasonLabel = CANCELLATION_REASON_LABELS[p.cancellationReason ?? ''] ?? null;
         content = `
           ${heroText('Order Cancelled', '❌')}
           ${greeting(p.customerName)}
           <p style="margin:0 0 16px;color:#555555;">Your order ${ref} has been cancelled.</p>
+          ${reasonLabel ? `<p style="margin:0 0 8px;color:#555555;"><strong>Reason:</strong> ${esc(reasonLabel)}</p>` : ''}
+          ${p.cancellationComment ? `<p style="margin:0 0 16px;color:#555555;"><strong>Comment:</strong> ${esc(p.cancellationComment)}</p>` : ''}
           ${p.paymentStatus === 'refunded'
             ? infoBox(`💸 A refund of <strong>${fmtPaise(p.total ?? 0)}</strong> has been initiated to your original payment method.`, 'blue')
             : infoBox('If you paid online, any pending charge will be automatically voided.', 'neutral')}
@@ -473,6 +530,7 @@ export class EmailService {
           ${divider()}
           ${ctaButton('Contact Us', `${this.storefrontUrl}/contact`)}`;
         break;
+      }
 
       case 'status_return_requested':
         content = `
@@ -518,6 +576,7 @@ export class EmailService {
     const ref = `#${p.orderNumber}`;
     const amt = p.total != null ? fmtPaise(p.total) : '';
     const track = p.trackingNumber ? ` Tracking: ${p.trackingNumber}${p.carrier ? ` (${p.carrier})` : ''}.` : '';
+    const reasonLabel = CANCELLATION_REASON_LABELS[p.cancellationReason ?? ''] ?? null;
     const map: Record<string, string> = {
       order_placed: `Your order ${ref} has been confirmed. Payment: ${this.titleCase(p.paymentMethod ?? '')} (${this.titleCase(p.paymentStatus ?? '')}). Total: ${amt}. View: ${orderLink}`,
       payment_captured: `Payment received for order ${ref}. Amount: ${amt}. View: ${orderLink}`,
@@ -526,7 +585,7 @@ export class EmailService {
       status_shipped: `Your order ${ref} has shipped.${track} Track: ${orderLink}`,
       status_out_for_delivery: `Your package for order ${ref} is out for delivery today.${track} Track: ${orderLink}`,
       status_delivered: `Your order ${ref} has been delivered. View: ${orderLink}`,
-      status_cancelled: `Your order ${ref} has been cancelled. View: ${orderLink}`,
+      status_cancelled: `Your order ${ref} has been cancelled.${reasonLabel ? ` Reason: ${reasonLabel}.` : ''} View: ${orderLink}`,
       status_return_requested: `Your return request for order ${ref} has been received. View: ${orderLink}`,
       status_return_approved: `Your return for order ${ref} has been approved. View: ${orderLink}`,
       status_return_rejected: `Your return request for order ${ref} was not approved. Contact us: ${this.storefrontUrl}/contact`,

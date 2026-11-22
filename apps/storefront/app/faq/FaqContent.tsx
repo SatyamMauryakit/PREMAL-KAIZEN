@@ -25,7 +25,7 @@ const FAQ_SECTIONS: FAQSection[] = [
       },
       {
         question: 'Can I modify or cancel my order after placing it?',
-        answer: 'Orders can be cancelled before they move to the "Processing" stage. Once packed or shipped, cancellations are no longer possible. Please contact us as soon as possible if you need to make changes.',
+        answer: 'You can cancel your order yourself from "My Orders" any time before it ships - this covers Pending, Confirmed, Processing, and Packed orders. Once an order is Shipped, cancellation is no longer possible. Please contact us as soon as possible if you need to make changes.',
       },
       {
         question: 'How can I track my order?',

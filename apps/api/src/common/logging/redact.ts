@@ -12,3 +12,8 @@ export function maskPhone(phone: string): string {
   const prefix = phone.startsWith('+') ? phone.slice(0, phone.length - digits.length) : '';
   return `${prefix}${'X'.repeat(digits.length - 4)}${digits.slice(-4)}`;
 }
+
+/** Masks an OTP destination for logging, auto-detecting whether it's an email or a phone number. */
+export function maskDestination(destination: string): string {
+  return destination.includes('@') ? maskEmail(destination) : maskPhone(destination);
+}

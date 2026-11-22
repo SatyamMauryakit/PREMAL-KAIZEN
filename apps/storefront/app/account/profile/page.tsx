@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { orderService, Order } from '@/lib/order-service';
 import { formatPaise } from '@/lib/pricing';
+import OtpInput from '@/components/auth/OtpInput';
 
 const STATUS_BADGE: Record<string, string> = {
   delivered: 'bg-green-100 text-green-800',
@@ -14,13 +15,173 @@ const STATUS_BADGE: Record<string, string> = {
 
 const RECENT_INVOICES_LIMIT = 5;
 
+type ChangeStep = 'idle' | 'enter' | 'otp';
+
+/** A two-step "change mobile number" / "change email" control: enter the new value, then verify an OTP sent to it. */
+function ContactChangeSection(props: {
+  label: string;
+  currentValue: string | null | undefined;
+  isVerified: boolean;
+  inputType: 'tel' | 'email';
+  placeholder: string;
+  autoOpen?: boolean;
+  onRequest: (newValue: string) => Promise<void>;
+  onVerify: (otp: string) => Promise<void>;
+  helperText: string;
+}) {
+  const { label, currentValue, isVerified, inputType, placeholder, autoOpen, onRequest, onVerify, helperText } = props;
+  const [step, setStep] = useState<ChangeStep>(autoOpen ? 'enter' : 'idle');
+  const [newValue, setNewValue] = useState(currentValue || '');
+  const [otp, setOtp] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [success, setSuccess] = useState('');
+  const [clearSignal, setClearSignal] = useState(0);
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const handleRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setInfo('');
+    if (!newValue.trim()) {
+      setError(`Please enter a ${label.toLowerCase()}.`);
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await onRequest(newValue.trim());
+      setStep('otp');
+      setCooldown(60);
+      setInfo('Verification code sent.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'We couldn\'t send your OTP right now. Please try again.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp.trim().length < 6) return;
+    setError('');
+    setIsBusy(true);
+    try {
+      await onVerify(otp.trim());
+      setSuccess(`Your ${label.toLowerCase()} has been updated and verified.`);
+      setStep('idle');
+      setOtp('');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Verification failed';
+      setError(msg);
+      setOtp('');
+      setClearSignal((c) => c + 1);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (cooldown > 0) return;
+    setError('');
+    setIsBusy(true);
+    try {
+      await onRequest(newValue.trim());
+      setCooldown(60);
+      setInfo('A new code has been sent.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resend code');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  return (
+    <div className="py-5 border-b border-gray-200 last:border-b-0">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm text-gray-600">{label}</p>
+          <p className="text-lg font-medium text-black">{currentValue || <span className="text-gray-400 italic">Not set</span>}</p>
+          <p className="text-sm mt-0.5">
+            {isVerified ? <span className="text-green-600">Verified</span> : <span className="text-yellow-600">Unverified</span>}
+          </p>
+        </div>
+        {step === 'idle' && (
+          <button
+            onClick={() => { setStep('enter'); setNewValue(currentValue || ''); setError(''); setSuccess(''); }}
+            className="text-sm font-medium text-black hover:underline whitespace-nowrap flex-shrink-0"
+          >
+            {currentValue && !isVerified ? 'Verify now' : `Change ${label.toLowerCase()}`}
+          </button>
+        )}
+      </div>
+
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mt-4 text-sm" role="status">{success}</div>
+      )}
+
+      {step === 'enter' && (
+        <form onSubmit={handleRequest} className="mt-4 space-y-3">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" role="alert">{error}</div>}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">New {label}</label>
+            <input
+              type={inputType}
+              value={newValue}
+              onChange={(e) => setNewValue(e.target.value)}
+              placeholder={placeholder}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
+              disabled={isBusy}
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">{helperText}</p>
+          </div>
+          <div className="flex gap-3">
+            <button type="submit" disabled={isBusy} className="bg-black text-cream px-5 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 disabled:bg-gray-400 transition-colors">
+              {isBusy ? 'Sending…' : 'Send Verification Code'}
+            </button>
+            <button type="button" onClick={() => setStep('idle')} className="px-5 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-black transition-colors">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {step === 'otp' && (
+        <div className="mt-4 space-y-3">
+          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" role="alert">{error}</div>}
+          {!error && info && <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg text-sm" role="status">{info}</div>}
+          <form onSubmit={handleVerify} className="space-y-3">
+            <p className="text-sm text-gray-600">Enter the 6-digit code sent to <strong>{newValue}</strong>.</p>
+            <OtpInput value={otp} onChange={setOtp} disabled={isBusy} clearSignal={clearSignal} autoFocus />
+            <div className="flex items-center gap-4">
+              <button type="submit" disabled={isBusy || otp.length < 6} className="bg-black text-cream px-5 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors">
+                {isBusy ? 'Verifying…' : 'Verify'}
+              </button>
+              <button type="button" onClick={handleResend} disabled={cooldown > 0 || isBusy} className="text-sm font-medium text-black hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed">
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend Code'}
+              </button>
+              <button type="button" onClick={() => { setStep('idle'); setOtp(''); setError(''); }} className="text-sm text-gray-600 hover:text-black">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProfilePage() {
-  const { user, isLoading, updateProfile } = useAuth();
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    phoneNumber: '',
-  });
+  const { user, isLoading, updateProfile, requestEmailUpdate, verifyEmailUpdate } = useAuth();
+
+  const [formData, setFormData] = useState({ firstName: '', lastName: '', phoneNumber: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -33,11 +194,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (user) {
-      setFormData({
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        phoneNumber: user.phoneNumber || '',
-      });
+      setFormData({ firstName: user.firstName || '', lastName: user.lastName || '', phoneNumber: user.phoneNumber || '' });
     }
   }, [user]);
 
@@ -73,10 +230,7 @@ export default function ProfilePage() {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -116,27 +270,22 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <div className="mb-8 pb-8 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Information</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-gray-600">Email</p>
-            <p className="text-lg font-medium text-black">{user?.email}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-600">Status</p>
-            <p className="text-lg font-medium text-black">
-              {user?.emailVerified ? (
-                <span className="text-green-600">Verified</span>
-              ) : (
-                <span className="text-yellow-600">Unverified</span>
-              )}
-            </p>
-          </div>
-        </div>
+      <div className="mb-8 pb-2 border-b border-gray-200">
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Contact Details</h3>
+        <ContactChangeSection
+          label="Email Address"
+          currentValue={user?.email}
+          isVerified={!!user?.emailVerified}
+          inputType="email"
+          placeholder="you@example.com"
+          onRequest={requestEmailUpdate}
+          onVerify={verifyEmailUpdate}
+          helperText="We'll send a 6-digit code to confirm this address before switching your login email."
+        />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        <h3 className="text-lg font-semibold text-gray-900">Name &amp; Mobile Number</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-2">
@@ -172,7 +321,7 @@ export default function ProfilePage() {
 
         <div>
           <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-            Phone Number
+            Mobile Number
           </label>
           <input
             id="phoneNumber"
@@ -181,9 +330,10 @@ export default function ProfilePage() {
             value={formData.phoneNumber}
             onChange={handleChange}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-beige focus:border-transparent"
-            placeholder="+91 98765 43210"
+            placeholder="9876543210"
             disabled={isSaving}
           />
+          <p className="text-xs text-gray-500 mt-1">Used for order updates only.</p>
         </div>
 
         <button

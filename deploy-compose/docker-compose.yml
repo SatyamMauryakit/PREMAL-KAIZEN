@@ -1,0 +1,112 @@
+# PREMAL KAIZEN - single-EC2 Docker Compose deployment (AWS account 518234071157).
+#
+# network_mode: host throughout - all 5 services share the EC2 host's own network
+# namespace directly. This is deliberate for a single-node deployment: it avoids
+# Docker's bridge-network DNS entirely (every service's "localhost" is the same
+# real host), which keeps the built frontend images' baked-in NEXT_PUBLIC_API_URL
+# correct for both server-side (SSR) and browser-side calls without a separate
+# internal-vs-external URL split.
+#
+# Postgres is NOT published to the public interface - command: -c listen_addresses
+# restricts it to 127.0.0.1 at the database level itself, not just via the EC2
+# security group (defense in depth - the DB refuses non-loopback connections even
+# if the security group were ever misconfigured).
+#
+# Secrets are NOT in this file - they come from .env (gitignored, created only on
+# the EC2 host, never committed).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: premal-postgres
+    restart: unless-stopped
+    network_mode: host
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGPORT: "5432"
+    volumes:
+      - /opt/premal-kaizen/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: premal-api:postgres-aad8dc3
+    container_name: premal-api
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_PORT: "3002"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}
+      APP_BASE_URL: ${APP_BASE_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      STORAGE_DRIVER: s3
+      AWS_REGION: ap-south-1
+      S3_BUCKET: ${S3_BUCKET}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      EMAIL_FROM: ${EMAIL_FROM}
+      CONTACT_NOTIFICATION_EMAIL: ${CONTACT_NOTIFICATION_EMAIL}
+    volumes:
+      - /opt/premal-kaizen/data/uploads:/app/apps/api/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get({host:'127.0.0.1',port:3002,path:'/api/health'},(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  storefront:
+    image: premal-storefront:postgres-aad8dc3
+    container_name: premal-storefront
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: "3000"
+      HOSTNAME: "127.0.0.1"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get({host:'127.0.0.1',port:3000,path:'/'},(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  admin:
+    image: premal-admin:postgres-aad8dc3
+    container_name: premal-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: "3001"
+      HOSTNAME: "127.0.0.1"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get({host:'127.0.0.1',port:3001,path:'/'},(r)=>process.exit(r.statusCode===200||r.statusCode===307?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: premal-caddy
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - storefront
+      - api
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/premal-kaizen/caddy_data:/data

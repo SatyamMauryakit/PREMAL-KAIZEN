@@ -33,6 +33,7 @@ export default {
       error: '#8B0000',
       warning: '#7C4D00',
       info: '#003366',
+      'accent-red': '#9B1B1B',
     },
     fontFamily: {
       display: ['Playfair Display', 'system-ui', '-apple-system', 'serif'],

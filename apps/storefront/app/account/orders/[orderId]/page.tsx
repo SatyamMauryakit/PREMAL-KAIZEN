@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { orderService, Order, OrderTimeline, OrderStatus } from '@/lib/order-service';
+import { orderService, Order, OrderTimeline, OrderStatus, CANCELLABLE_STATUSES, CANCELLATION_REASONS, CancellationReason } from '@/lib/order-service';
 import { formatPaise } from '@/lib/pricing';
 import Link from 'next/link';
 
 const STATUS_SEQUENCE: OrderStatus[] = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
+const SHIPPING_IN_PROGRESS_STATUSES: OrderStatus[] = ['shipped', 'out_for_delivery', 'delivered'];
+const REFUND_STATUS_LABELS: Record<string, string> = {
+  pending: 'Refund Pending',
+  processing: 'Refund Pending',
+  refunded: 'Refunded',
+  failed: 'Refund Failed',
+};
 
 interface OrderDetailsPageProps {
   params: Promise<{ orderId: string }>;
@@ -19,6 +26,12 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string>('');
+  const [isCancelPanelOpen, setIsCancelPanelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState<CancellationReason>('mistake');
+  const [cancelComment, setCancelComment] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const resolveParams = async () => {
@@ -77,10 +90,33 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
   };
 
   const isInvoiceable = orderService.isInvoiceable(order);
+  const isCancellable = CANCELLABLE_STATUSES.includes(order.orderStatus);
+  const isShippingInProgress = SHIPPING_IN_PROGRESS_STATUSES.includes(order.orderStatus);
+
+  const handleCancelOrder = async () => {
+    const token = localStorage.getItem('sessionToken');
+    if (!token) return;
+    setIsCancelling(true);
+    setCancelError(null);
+    try {
+      const updated = await orderService.cancelOrder(order.id, cancelReason, cancelComment.trim(), token);
+      setOrder(updated);
+      setIsCancelPanelOpen(false);
+      setCancelNotice('Your order has been cancelled successfully.');
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : 'Could not cancel order. Please try again.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
       <Link href="/account/orders" className="text-black font-medium hover:underline">← Back to Orders</Link>
+
+      {cancelNotice && (
+        <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded">{cancelNotice}</div>
+      )}
 
       {/* Order Header */}
       <div className="bg-white rounded-lg shadow-md p-8">
@@ -108,8 +144,82 @@ export default function OrderDetailsPage({ params }: OrderDetailsPageProps) {
                 Download Invoice
               </button>
             )}
+            {isCancellable && !isCancelPanelOpen && (
+              <button
+                onClick={() => { setIsCancelPanelOpen(true); setCancelError(null); }}
+                className="mt-1 flex items-center gap-2 px-4 py-2 border border-red-600 text-red-600 text-sm font-medium rounded hover:bg-red-600 hover:text-white transition-colors"
+              >
+                Cancel Order
+              </button>
+            )}
+            {isShippingInProgress && (
+              <p className="mt-1 text-sm text-gray-600 max-w-xs text-right">
+                Cancellation is no longer available because your order has entered the shipping process.
+              </p>
+            )}
+            {order.orderStatus === 'cancelled' && (
+              <div className="mt-1 text-sm text-gray-700 max-w-xs text-right space-y-1">
+                <p className="font-medium text-black">Order Cancelled</p>
+                {order.cancelledAt && <p>on {new Date(order.cancelledAt).toLocaleDateString('en-IN')}</p>}
+                {order.cancellationReason && (
+                  <p>Reason: {CANCELLATION_REASONS.find((r) => r.value === order.cancellationReason)?.label || order.cancellationReason}</p>
+                )}
+                {order.refundStatus && (
+                  <p className="font-medium">{REFUND_STATUS_LABELS[order.refundStatus] || order.refundStatus}</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
+
+        {isCancelPanelOpen && (
+          <div className="mt-6 pt-6 border-t bg-red-50 border border-red-200 rounded-lg p-6 -mx-2">
+            <p className="font-medium text-black mb-4">
+              Are you sure you want to cancel this order? This action cannot be undone.
+            </p>
+            {cancelError && <p className="text-red-700 text-sm mb-3">{cancelError}</p>}
+            <div className="space-y-4 max-w-md">
+              <div>
+                <label className="block text-sm font-medium text-black mb-1">Reason for cancellation</label>
+                <select
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value as CancellationReason)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-black"
+                >
+                  {CANCELLATION_REASONS.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-black mb-1">Additional comment (optional)</label>
+                <textarea
+                  value={cancelComment}
+                  onChange={(e) => setCancelComment(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:border-black"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCancelOrder}
+                  disabled={isCancelling}
+                  className="px-5 py-2 bg-red-600 text-white text-sm font-semibold rounded hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {isCancelling ? 'Cancelling...' : 'Confirm Cancellation'}
+                </button>
+                <button
+                  onClick={() => setIsCancelPanelOpen(false)}
+                  disabled={isCancelling}
+                  className="px-5 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded hover:border-black transition-colors"
+                >
+                  Keep Order
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Timeline */}
         <div className="mt-8 pt-8 border-t">

@@ -1,7 +1,9 @@
-import { Controller, Get, Put, Post, Delete, Param, Body, Request, UseGuards, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Param, Body, Request, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CustomerService } from './customer.service';
 import { CartService } from './cart.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import { CreateAddressDto, UpdateAddressDto } from './dto/address.dto';
 
 /**
  * CustomerController
@@ -33,7 +35,9 @@ export class CustomerController {
 
   /**
    * PUT /api/customer/profile
-   * Update customer profile
+   * Update customer profile: name and mobile number (a plain, unverified
+   * contact field - see CustomerService.updateProfile). Email goes through
+   * the dedicated OTP-gated change flow below.
    */
   @Put('profile')
   async updateProfile(
@@ -52,6 +56,32 @@ export class CustomerController {
   async changePassword(@Request() req: any, @Body() body: { currentPassword: string; newPassword: string }) {
     const userId = this.extractUserId(req);
     return this.customerService.changePassword(userId, body.currentPassword, body.newPassword);
+  }
+
+  // ========================================================================
+  // EMAIL ADDRESS CHANGE (OTP-gated)
+  // ========================================================================
+
+  /** POST /api/customer/email/request-update - send an OTP to a new email address. */
+  @Throttle({ default: { limit: 5, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
+  @Post('email/request-update')
+  async requestEmailUpdate(@Request() req: any, @Body() body: { email: string }) {
+    if (!body.email) {
+      throw new BadRequestException('Email is required');
+    }
+    const userId = this.extractUserId(req);
+    return this.customerService.requestEmailUpdate(userId, body.email);
+  }
+
+  /** POST /api/customer/email/verify-update - verify the OTP and commit the new email address. */
+  @Throttle({ default: { limit: 10, ttl: 60000 }, otp: { limit: 10, ttl: 900000 } })
+  @Post('email/verify-update')
+  async verifyEmailUpdate(@Request() req: any, @Body() body: { otp: string }) {
+    if (!body.otp) {
+      throw new BadRequestException('OTP is required');
+    }
+    const userId = this.extractUserId(req);
+    return this.customerService.verifyEmailUpdate(userId, body.otp);
   }
 
   // ========================================================================
@@ -83,7 +113,7 @@ export class CustomerController {
    * Create new address
    */
   @Post('addresses')
-  async createAddress(@Request() req: any, @Body() body: any) {
+  async createAddress(@Request() req: any, @Body() body: CreateAddressDto) {
     const userId = this.extractUserId(req);
     return this.customerService.createAddress(userId, body);
   }
@@ -93,7 +123,7 @@ export class CustomerController {
    * Update address
    */
   @Put('addresses/:id')
-  async updateAddress(@Request() req: any, @Param('id') addressId: string, @Body() body: any) {
+  async updateAddress(@Request() req: any, @Param('id') addressId: string, @Body() body: UpdateAddressDto) {
     const userId = this.extractUserId(req);
     return this.customerService.updateAddress(userId, addressId, body);
   }

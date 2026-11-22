@@ -1,0 +1,31 @@
+# Replace <PUBLIC_IP> with the Elastic IP and <OWNER_IP> with the admin's own public IP.
+{
+	default_sni <PUBLIC_IP>
+}
+
+https://<PUBLIC_IP> {
+	tls internal
+	# Public first-admin bootstrap endpoint: only reachable from the owner's IP.
+	handle /api/auth/admin/bootstrap {
+		@blocked not remote_ip <OWNER_IP>
+		respond @blocked 403
+		reverse_proxy 127.0.0.1:3002
+	}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+	encode gzip
+}
+
+http://<PUBLIC_IP> {
+	redir https://<PUBLIC_IP>{uri} permanent
+}
+
+https://<PUBLIC_IP>:3001 {
+	tls internal
+	reverse_proxy 127.0.0.1:3101
+	encode gzip
+}

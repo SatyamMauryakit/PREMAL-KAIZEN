@@ -53,6 +53,14 @@ export interface NotificationPayload {
   trackingNumber?: string | null;
 
   invoiceNumber?: string | null;
+
+  // Cancellation (customer self-service cancel) - only set for status_cancelled when
+  // the cancellation came through the customer-facing flow.
+  cancellationReason?: string | null;
+  cancellationComment?: string | null;
+
+  // Refund tracking (payment_refunded)
+  refundId?: string | null;
 }
 
 export type NotificationEventType =

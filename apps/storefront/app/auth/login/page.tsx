@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import OtpInput from '@/components/auth/OtpInput';
 
 function LoginForm() {
   const router = useRouter();
@@ -17,8 +18,11 @@ function LoginForm() {
   const [error, setError] = useState('');
   const [otpMessage, setOtpMessage] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [clearSignal, setClearSignal] = useState(0);
 
-  const redirectTo = searchParams.get('redirect') || '/account';
+  // Land on the homepage (banners + products) after a plain login; a `redirect` param
+  // still wins when login was prompted mid-flow (e.g. from checkout).
+  const redirectTo = searchParams.get('redirect') || '/';
 
   // Countdown timer for resend cooldown
   useEffect(() => {
@@ -40,7 +44,7 @@ function LoginForm() {
       const result = await login(email, password);
       if (result.requiresOtp) {
         // Mandatory 2nd factor: a password alone never logs the customer in -
-        // the backend hasn't issued a session, only sent a fresh OTP.
+        // the backend hasn't issued a session, only sent a fresh OTP by email.
         setStep('otp');
         setOtpMessage('We sent a 6-digit verification code to your email.');
         setResendCooldown(60);
@@ -72,7 +76,10 @@ function LoginForm() {
       await verifyLoginOtp(email, otp.trim());
       router.push(redirectTo);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed');
+      const msg = err instanceof Error ? err.message : 'Verification failed';
+      setError(msg);
+      setOtp('');
+      setClearSignal((c) => c + 1);
     }
   };
 
@@ -175,29 +182,17 @@ function LoginForm() {
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm">{error}</div>
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 text-sm" role="alert">{error}</div>
               )}
               {!error && otpMessage && (
-                <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg mb-6 text-sm">{otpMessage}</div>
+                <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg mb-6 text-sm" role="status">{otpMessage}</div>
               )}
 
               <form onSubmit={handleOtpSubmit} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Verification Code</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="• • • • • •"
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black text-center text-3xl font-mono tracking-[0.4em]"
-                    required
-                    autoFocus
-                    disabled={isLoading}
-                  />
-                  <p className="text-xs text-gray-500 mt-1 text-center">The code expires in 5 minutes.</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 text-center">Verification Code</label>
+                  <OtpInput value={otp} onChange={setOtp} disabled={isLoading} clearSignal={clearSignal} autoFocus />
+                  <p className="text-xs text-gray-500 mt-2 text-center">The code expires in 5 minutes.</p>
                 </div>
 
                 <button

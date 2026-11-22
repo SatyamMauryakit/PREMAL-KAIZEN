@@ -1,0 +1,42 @@
+# One-shot Job that applies Postgres migrations before the API Deployment is
+# (re)applied - same gating principle as the old (stale) SQLite migration Job, now
+# pointed at apps/api/prisma-postgres/schema.prisma instead. backoffLimit: 0 means a
+# failed migration does NOT retry automatically (a half-applied migration retried
+# blindly is worse than one that stops and pages someone) - fix forward and re-apply
+# this Job (delete + recreate; Jobs are immutable) rather than let it auto-retry.
+#
+# Requires the API image to have been built with
+# `--build-arg DATABASE_PROVIDER=postgresql` (see apps/api/Dockerfile) so this same
+# image's node_modules/@prisma/client and apps/api/prisma-postgres/migrations/ are
+# both actually present and Postgres-flavored.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: premal-api-migrate
+  namespace: premal-kaizen
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: migrate
+          image: premal-api:postgres-local # override per environment (matches the Deployment's image)
+          command: ["apps/api/node_modules/.bin/prisma", "migrate", "deploy", "--schema=apps/api/prisma-postgres/schema.prisma"]
+          workingDir: /app
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@premal-postgres:5432/$(POSTGRES_DB)"
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_DB } }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }

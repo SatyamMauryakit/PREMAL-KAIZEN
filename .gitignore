@@ -62,10 +62,10 @@ apps/api/seed-test-admin.js
 # Data exports/working files, not application source
 *.xlsx
 
-# Throwaway schemas/generated clients used to test an alternate datasource (e.g. Postgres
-# migration testing) - these must never be committed or relied upon by the real app.
-apps/api/prisma/schema.*-test.prisma
-apps/api/prisma/generated/
+# Throwaway schema/generated client used to test an alternate datasource (PostgreSQL
+# migration validation) - an entire sibling directory of apps/api/prisma/, never a file
+# inside it, so its migrations folder structurally cannot resolve to the real one. Must
+# never be committed or relied upon by the real app.
 
 # deploy.sh's real Kubernetes Secret, generated locally from 02-secret.example.yaml on
 # the EC2 host - contains real values once edited, must never be committed. The
@@ -88,3 +88,16 @@ razorpay_migration.sql
 *.pfx
 *.crt
 *.cer
+
+# Built Docker image tarballs used as a transport mechanism to ship images to the
+# EC2 host (docker save | gzip) - these are build output, not source, and are large
+# (100MB+ each). The Caddyfile/docker-compose.yml/backup.sh alongside them ARE
+# tracked - they're real infrastructure-as-code with no secrets (values come from
+# .env on the host, never hardcoded here).
+deploy-compose/*.tar.gz
+
+# generated Prisma client for the postgres schema (platform-specific binaries)
+apps/api/prisma-postgres/generated-client/
+
+# real AWS resource IDs (repo is public)
+deploy-aws/RESOURCES.local.md

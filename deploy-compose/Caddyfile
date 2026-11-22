@@ -1,0 +1,32 @@
+# PREMAL KAIZEN - pre-domain configuration (plain HTTP on :80 only).
+#
+# No domain is configured yet - per explicit instruction, DNS/HTTPS is deliberately
+# NOT set up here. This serves the storefront + API over plain HTTP on the bare EC2
+# IP for now, strictly for verification. Admin is intentionally NOT exposed here -
+# verify it via an SSM port-forward in the meantime; it gets its own subdomain site
+# block (e.g. admin.<domain>) once a real domain is approved, consistent with the
+# existing security preference of not exposing the admin panel as casually as the
+# public storefront/API.
+#
+# Once a domain is approved: this :80 block becomes a redirect-to-HTTPS, and new
+# site blocks (https://<domain>, https://api.<domain>, https://admin.<domain>) are
+# added - Caddy provisions Let's Encrypt certs automatically the moment a real
+# domain name is used as a site address.
+
+:80 {
+	# NestJS API - already prefixes its own routes with /api, so no path
+	# rewriting/stripping is needed here.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3002
+	}
+
+	# Everything else goes to the storefront.
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	encode gzip
+	log {
+		output file /data/caddy-access.log
+	}
+}

@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: premal-postgres
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 300m
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "shared_buffers=64MB", "-c", "max_connections=40", "-c", "work_mem=4MB"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGPORT: "5432"
+    volumes:
+      - /opt/premal-kaizen/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: premal-api:v2
+    container_name: premal-api
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 550m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=400
+      API_PORT: "3002"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}
+      APP_BASE_URL: ${APP_BASE_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      STORAGE_DRIVER: s3
+      AWS_REGION: ap-south-1
+      S3_BUCKET: ${S3_BUCKET}
+      S3_KEY_PREFIX: products/
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      EMAIL_FROM: ${EMAIL_FROM}
+      CONTACT_NOTIFICATION_EMAIL: ${CONTACT_NOTIFICATION_EMAIL}
+
+  storefront:
+    image: premal-storefront:v2
+    container_name: premal-storefront
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 400m
+    environment:
+      PORT: "3000"
+      HOSTNAME: "127.0.0.1"
+      NODE_OPTIONS: --max-old-space-size=300
+      NODE_EXTRA_CA_CERTS: /caddy-data/caddy/pki/authorities/local/root.crt
+    volumes:
+      - /opt/premal-kaizen/caddy_data:/caddy-data:ro
+
+  admin:
+    image: premal-admin:v2
+    container_name: premal-admin
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 400m
+    environment:
+      PORT: "3101"
+      HOSTNAME: "127.0.0.1"
+      NODE_OPTIONS: --max-old-space-size=300
+      NODE_EXTRA_CA_CERTS: /caddy-data/caddy/pki/authorities/local/root.crt
+    volumes:
+      - /opt/premal-kaizen/caddy_data:/caddy-data:ro
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: premal-caddy
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: 150m
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/premal-kaizen/caddy_data:/data

@@ -65,6 +65,13 @@ export default function OrdersPage() {
     return status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ');
   };
 
+  const REFUND_BADGE: Record<string, { label: string; color: string }> = {
+    pending: { label: 'Refund Pending', color: 'bg-amber-100 text-amber-700' },
+    processing: { label: 'Refund Pending', color: 'bg-amber-100 text-amber-700' },
+    refunded: { label: 'Refunded', color: 'bg-blue-100 text-blue-700' },
+    failed: { label: 'Refund Failed', color: 'bg-red-100 text-red-700' },
+  };
+
   return (
     <RequirePermission permission="orders:view">
     <div className="min-h-screen bg-gray-light">
@@ -145,11 +152,18 @@ export default function OrdersPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          order.paymentStatus === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {formatStatus(order.paymentStatus)}
-                        </span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            order.paymentStatus === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {formatStatus(order.paymentStatus)}
+                          </span>
+                          {order.refundStatus && REFUND_BADGE[order.refundStatus] && (
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${REFUND_BADGE[order.refundStatus].color}`}>
+                              {REFUND_BADGE[order.refundStatus].label}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-medium">
                         {new Date(order.createdAt).toLocaleDateString('en-IN')}

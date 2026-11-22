@@ -143,6 +143,16 @@ export const Header: React.FC = () => {
                           My Account
                         </Link>
                         <Link
+                          href="/account/orders"
+                          className="group flex items-center gap-3 px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <svg className="w-4 h-4 text-neutral-400 group-hover:text-beige transition-colors flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 2a1 1 0 00-1 1v1H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2V3a1 1 0 00-1-1H9zm0 2h6v2H9V4zM7 10h10M7 14h7" />
+                          </svg>
+                          My Orders
+                        </Link>
+                        <Link
                           href="/account/addresses"
                           className="group flex items-center gap-3 px-4 py-2.5 text-cream hover:bg-neutral-800 hover:text-beige transition-colors text-sm"
                           onClick={() => setUserMenuOpen(false)}

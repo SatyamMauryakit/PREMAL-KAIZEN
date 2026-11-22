@@ -157,7 +157,7 @@ export default function TrackOrderPage() {
             </p>
             <div className="text-center">
               <Link
-                href="/auth/signin"
+                href="/auth/login?redirect=/orders"
                 className="inline-block px-6 py-2 bg-black text-cream rounded hover:bg-gray-dark transition-colors font-medium"
               >
                 Sign In to Your Account

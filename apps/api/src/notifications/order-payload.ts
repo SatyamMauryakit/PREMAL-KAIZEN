@@ -49,5 +49,8 @@ export function buildOrderPayload(order: any): NotificationPayload {
       : null,
     carrier: order.carrier ?? null,
     trackingNumber: order.trackingNumber ?? null,
+    cancellationReason: order.cancellationReason ?? null,
+    cancellationComment: order.cancellationComment ?? null,
+    refundId: order.refundId ?? null,
   };
 }
