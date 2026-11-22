@@ -38,6 +38,11 @@ RUN pnpm --filter @premal/storefront run build
 
 # ---- runtime: minimal image, non-root ----
 FROM node:${NODE_VERSION}-slim AS runtime
+# tini (PID 1 init) ensures SIGTERM from `docker stop`/Kubernetes actually reaches
+# `next start`'s Node process promptly and zombies get reaped - see apps/api/Dockerfile's
+# comment for the full rationale, same fix applied identically across all 3 images.
+RUN apt-get update && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
 # Fixed numeric UID/GID (see apps/api/Dockerfile's comment for the full rationale) -
 # this image doesn't itself need persistent storage, but the same fixed ID is used
 # across all 3 images for consistency.
@@ -46,6 +51,17 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# ARGs do NOT carry across build stages - must be re-declared here. NEXT_PUBLIC_API_URL
+# is baked into the CLIENT bundle by the build stage above, but server-side code
+# (generateMetadata, Server Components doing SSR fetches - e.g. app/products/[id]/page.tsx)
+# reads `process.env.NEXT_PUBLIC_API_URL` at RUNTIME in this container, not from the
+# bundle. Without this, every server-side fetch silently gets `undefined` as the base
+# URL and fails - this bit the product detail page specifically (found via real
+# production QA, not assumed): the API call failed, generateMetadata/the page treated
+# that as "product not found", and every product page 404'd despite the product
+# genuinely existing and the client-side (browser) calls working fine.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 # Standalone output structure confirmed empirically inside this same Linux build (see
 # phase report) - Next's file tracer preserves the monorepo path from the workspace
@@ -64,4 +80,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.PORT||3000,path:'/'},(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server.js"]

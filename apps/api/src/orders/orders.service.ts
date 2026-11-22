@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { SettingsService } from '../settings/settings.service';
@@ -40,6 +40,13 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   return_approved: [], // Terminal (refund, if any, is a payment-status change)
   return_rejected: [], // Terminal
 };
+
+// Statuses a customer may still self-cancel from - derived from STATUS_TRANSITIONS so
+// it can never drift out of sync with the admin-side transition rules (currently
+// resolves to pending/confirmed/processing/packed; shipped+ has no path to cancelled).
+const CANCELLABLE_STATUSES = Object.keys(STATUS_TRANSITIONS).filter((status) =>
+  STATUS_TRANSITIONS[status].includes('cancelled'),
+);
 
 @Injectable()
 export class OrdersService {
@@ -483,6 +490,10 @@ export class OrdersService {
         data: {
           status: newStatus,
           updatedAt: new Date(),
+          // Admin-initiated cancellation via this generic status route: no reason UI
+          // exists here (that's customer-cancel-only, see cancelByCustomer), but the
+          // who/when is still recorded for consistency with that path.
+          ...(newStatus === 'cancelled' ? { cancelledAt: new Date(), cancelledBy: changedBy ?? null } : {}),
         },
         include: { items: true, address: true, user: { select: { id: true, email: true, firstName: true, lastName: true, phoneNumber: true } } },
       });
@@ -495,9 +506,128 @@ export class OrdersService {
       await this.inventoryService.restoreForCancellation(order.items, id).catch((err) => {
         this.logger.error(`Stock restore failed for cancelled order ${id}: ${err.message}`);
       });
+      // Admin-initiated cancellation (e.g. the status dropdown) gets the same real
+      // Razorpay refund as customer self-service cancellation - cancellation and
+      // refund stay consistent regardless of who triggered it.
+      await this.attemptRefund(updated).catch((err) => {
+        this.logger.error(`Refund attempt failed for cancelled order ${id}: ${err.message}`);
+      });
     }
 
     return updated;
+  }
+
+  /**
+   * Customer self-service cancellation (POST /api/orders/:id/cancel). Distinct from
+   * the generic admin updateStatus() above: enforces ownership, captures a reason/
+   * comment, and - critically - uses an atomic conditional update rather than a plain
+   * read-then-write, so a customer cancelling at the exact moment an admin confirms
+   * shipping can never both succeed (whichever write lands first wins; the loser's
+   * updateMany matches zero rows because the status no longer satisfies the WHERE).
+   */
+  async cancelByCustomer(orderId: string, userId: string, reason: string, comment?: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: { include: { product: true } }, address: true, user: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order with ID ${orderId} not found`);
+    }
+    if (order.userId !== userId) {
+      throw new ForbiddenException('You do not have permission to cancel this order.');
+    }
+    if (!CANCELLABLE_STATUSES.includes(order.status)) {
+      throw new ForbiddenException(
+        'Cancellation is no longer available because your order has entered the shipping process.',
+      );
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.order.updateMany({
+        where: { id: orderId, status: { in: CANCELLABLE_STATUSES } },
+        data: {
+          status: 'cancelled',
+          cancelledAt: now,
+          cancelledBy: userId,
+          cancellationReason: reason,
+          cancellationComment: comment ?? null,
+          updatedAt: now,
+        },
+      });
+
+      // Lost the race - the order's status changed (e.g. admin confirmed shipping)
+      // between our eligibility check above and this write. Abort the whole
+      // transaction: nothing commits, the order keeps whatever status won.
+      if (result.count === 0) {
+        throw new ConflictException('This order can no longer be cancelled - its status has just changed.');
+      }
+
+      await tx.orderStatusEvent.create({
+        data: { orderId, fromStatus: order.status, toStatus: 'cancelled', changedBy: userId, note: `Customer cancellation: ${reason}` },
+      });
+
+      const freshOrder = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: { include: { product: true } }, address: true, user: true },
+      });
+      const payload = buildOrderPayload(freshOrder);
+      await this.notificationService.enqueue(orderId, 'status_cancelled', payload, { tx });
+
+      return freshOrder;
+    });
+
+    // Same fire-and-forget-after-commit precedent as updateStatus() above: inventory
+    // restore and the refund attempt are not atomic with the status change itself.
+    await this.inventoryService.restoreForCancellation(order.items, orderId).catch((err) => {
+      this.logger.error(`Stock restore failed for cancelled order ${orderId}: ${err.message}`);
+    });
+    await this.attemptRefund(updated).catch((err) => {
+      this.logger.error(`Refund attempt failed for cancelled order ${orderId}: ${err.message}`);
+    });
+
+    return updated;
+  }
+
+  /**
+   * Issues a real Razorpay refund for a cancelled order, if one is actually owed.
+   * Never throws - a refund failure must never undo or block the cancellation that
+   * already committed. COD orders and anything never actually captured are skipped
+   * entirely (nothing was ever charged, so there is nothing to refund).
+   */
+  private async attemptRefund(order: any): Promise<void> {
+    const refundEligible =
+      order.paymentMethod !== 'cod' &&
+      order.paymentStatus === 'completed' &&
+      !!order.paymentVerifiedAt &&
+      !!order.razorpayPaymentId;
+
+    if (!refundEligible) return;
+
+    // Duplicate-refund guard: only proceed if no refund is already in flight or done.
+    // This is the same conditional-updateMany pattern used for the cancellation
+    // itself above - a concurrent second call (retry, double-click, webhook race)
+    // matches zero rows and is a no-op.
+    const claimed = await this.prisma.order.updateMany({
+      where: { id: order.id, OR: [{ refundStatus: null }, { refundStatus: 'failed' }] },
+      data: { refundStatus: 'processing' },
+    });
+    if (claimed.count === 0) return;
+
+    try {
+      const refund = await this.razorpayService.refund(order.razorpayPaymentId, order.total);
+      const refundedOrder = await this.prisma.order.update({
+        where: { id: order.id },
+        data: { refundStatus: 'refunded', refundId: refund.id, paymentStatus: 'refunded' },
+        include: { items: { include: { product: true } }, address: true, user: true },
+      });
+      const payload = buildOrderPayload(refundedOrder);
+      await this.notificationService.enqueue(order.id, 'payment_refunded', payload);
+    } catch (err: any) {
+      this.logger.error(`Razorpay refund failed for order ${order.id}: ${err.message}`);
+      await this.prisma.order.update({ where: { id: order.id }, data: { refundStatus: 'failed' } });
+    }
   }
 
   async updatePaymentStatus(id: string, paymentStatus: string, changedBy?: string) {

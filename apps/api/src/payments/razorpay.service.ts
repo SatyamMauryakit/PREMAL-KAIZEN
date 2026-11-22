@@ -113,6 +113,20 @@ export class RazorpayService {
    * by Razorpay (signature is computed over the exact raw bytes, not a re-serialized
    * JSON object which can differ in whitespace/key order).
    */
+  /**
+   * Issues a refund for an already-captured payment. `amountInPaise` must be the
+   * server-computed order total (or less, for a partial refund) - never a client-
+   * supplied value. Razorpay returns 'processed' for instant refunds or 'pending'
+   * for ones that settle over the next few days; either way this call itself never
+   * throws for a normal decline - only for real API/network failures, which the
+   * caller is expected to catch and record as a failed refund attempt.
+   */
+  async refund(paymentId: string, amountInPaise: number, notes?: Record<string, string>): Promise<{ id: string; status: string }> {
+    const client = this.getClient();
+    const refund = await client.payments.refund(paymentId, { amount: amountInPaise, notes });
+    return { id: refund.id, status: refund.status };
+  }
+
   verifyWebhookSignature(rawBody: Buffer | string, signatureHeader: string | undefined): boolean {
     if (!this.webhookSecret) {
       this.logger.warn('Cannot verify webhook signature - RAZORPAY_WEBHOOK_SECRET not configured');

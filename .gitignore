@@ -66,7 +66,6 @@ apps/api/seed-test-admin.js
 # migration validation) - an entire sibling directory of apps/api/prisma/, never a file
 # inside it, so its migrations folder structurally cannot resolve to the real one. Must
 # never be committed or relied upon by the real app.
-apps/api/prisma-postgres-test/
 
 # deploy.sh's real Kubernetes Secret, generated locally from 02-secret.example.yaml on
 # the EC2 host - contains real values once edited, must never be committed. The
@@ -96,3 +95,6 @@ razorpay_migration.sql
 # tracked - they're real infrastructure-as-code with no secrets (values come from
 # .env on the host, never hardcoded here).
 deploy-compose/*.tar.gz
+
+# generated Prisma client for the postgres schema (platform-specific binaries)
+apps/api/prisma-postgres/generated-client/

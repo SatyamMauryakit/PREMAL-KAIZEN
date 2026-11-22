@@ -3,14 +3,16 @@ import { ValidationPipe } from '@nestjs/common';
 
 /**
  * Confirms, empirically rather than by reasoning alone, that the global
- * ValidationPipe wired in main.ts is a no-op against every existing route in this
- * codebase - none of them use a real class-validator-decorated DTO class (every
- * @Body() is typed `any` or a plain inline object type, which TypeScript erases at
- * runtime). NestJS's ValidationPipe skips validation/transformation entirely for
- * metatypes it doesn't recognize as a custom class (String/Boolean/Number/Array/
- * Object), which is exactly what every current endpoint's param reflects as.
+ * ValidationPipe wired in main.ts is a no-op for any route whose @Body() is typed
+ * `any` or a plain inline object type (TypeScript erases both at runtime) - NestJS's
+ * ValidationPipe skips validation/transformation entirely for metatypes it doesn't
+ * recognize as a custom class (String/Boolean/Number/Array/Object). Real
+ * class-validator DTOs now exist for the higher-risk routes (orders, payments,
+ * promotions, banners, reviews) - this test documents the behavior for the routes
+ * that still take an untyped body (products, categories, customer, inventory,
+ * settings, etc.), not a claim that no DTOs exist anywhere in the codebase.
  */
-describe('global ValidationPipe against this codebase (no DTO classes exist yet)', () => {
+describe('global ValidationPipe against an untyped (any/Object) body param', () => {
   const pipe = new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false });
 
   it('passes an arbitrary plain object through completely unchanged for an untyped (Object) body param', async () => {

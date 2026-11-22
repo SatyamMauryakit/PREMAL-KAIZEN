@@ -19,6 +19,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { PaymentsModule } from './payments/payments.module';
 import { EmailModule } from './email/email.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { BannersModule } from './banners/banners.module';
 
 /**
  * AppModule
@@ -82,6 +83,7 @@ import { ReviewsModule } from './reviews/reviews.module';
     PaymentsModule,
     EmailModule,
     ReviewsModule,
+    BannersModule,
   ],
   controllers: [],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

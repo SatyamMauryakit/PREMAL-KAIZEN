@@ -50,6 +50,12 @@ export interface Order {
   internalNotes?: string;
   addressId?: string;
   address?: OrderAddress;
+  cancellationReason?: string | null;
+  cancellationComment?: string | null;
+  cancelledAt?: string | null;
+  cancelledBy?: string | null;
+  refundStatus?: 'pending' | 'processing' | 'refunded' | 'failed' | null;
+  refundId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

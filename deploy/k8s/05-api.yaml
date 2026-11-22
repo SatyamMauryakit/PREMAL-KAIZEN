@@ -1,0 +1,93 @@
+# API (NestJS). Postgres replaces SQLite, so (unlike the old stale manifests) there is
+# no `strategy: Recreate` constraint and no file-based volume mount for a database -
+# RollingUpdate is safe since Postgres itself handles concurrent connections. replicas
+# stays at 1 anyway: this is still a single-node K3s host (see deploy/README.md's own
+# "single point of failure, by design" stance) and a second API replica would add no
+# real availability while doubling memory pressure on a resource-constrained box.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premal-api
+  namespace: premal-kaizen
+  labels:
+    app.kubernetes.io/name: premal-api
+    app.kubernetes.io/part-of: premal-kaizen
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app: premal-api }
+  template:
+    metadata:
+      labels: { app: premal-api }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: api
+          image: premal-api:postgres-local # override per environment/CI
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - configMapRef: { name: premal-api-config }
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@premal-postgres:5432/$(POSTGRES_DB)"
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: POSTGRES_DB } }
+            - name: RAZORPAY_KEY_ID
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: RAZORPAY_KEY_ID } }
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: RAZORPAY_KEY_SECRET } }
+            - name: RAZORPAY_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: RAZORPAY_WEBHOOK_SECRET } }
+            - name: SMTP_HOST
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: SMTP_HOST } }
+            - name: SMTP_PORT
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: SMTP_PORT } }
+            - name: SMTP_USER
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: SMTP_USER } }
+            - name: SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: SMTP_PASSWORD } }
+            - name: EMAIL_FROM
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: EMAIL_FROM } }
+            - name: CONTACT_NOTIFICATION_EMAIL
+              valueFrom: { secretKeyRef: { name: premal-api-secrets, key: CONTACT_NOTIFICATION_EMAIL } }
+          resources:
+            requests: { cpu: 150m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          # No DB dependency (see src/health/health.controller.ts) - deliberately so a
+          # slow/unreachable DB never causes a liveness-triggered restart loop.
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3002 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: { path: /api/health/ready, port: 3002 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet: { path: /api/health, port: 3002 }
+            failureThreshold: 20 # allow up to ~100s to boot before the other probes kick in
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-api
+  namespace: premal-kaizen
+spec:
+  selector: { app: premal-api }
+  ports:
+    - port: 3002
+      targetPort: 3002

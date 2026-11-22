@@ -46,6 +46,11 @@ RUN pnpm --filter @premal/admin run build
 
 # ---- runtime: minimal image, non-root ----
 FROM node:${NODE_VERSION}-slim AS runtime
+# tini (PID 1 init) ensures SIGTERM from `docker stop`/Kubernetes actually reaches
+# `next start`'s Node process promptly and zombies get reaped - see apps/api/Dockerfile's
+# comment for the full rationale, same fix applied identically across all 3 images.
+RUN apt-get update && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
 # Fixed numeric UID/GID (see apps/api/Dockerfile's comment for the full rationale) -
 # this image doesn't itself need persistent storage, but the same fixed ID is used
 # across all 3 images for consistency.
@@ -54,6 +59,15 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV HOSTNAME=0.0.0.0
+# ARGs do NOT carry across build stages - must be re-declared here. Server-side code
+# (Server Components, generateMetadata, etc.) reads `process.env.NEXT_PUBLIC_*` at
+# RUNTIME in this container, not from the client bundle - without this, any such
+# call silently sees `undefined` (see the storefront Dockerfile's identical fix for
+# the concrete production bug this caused there).
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_STOREFRONT_URL
+ENV NEXT_PUBLIC_STOREFRONT_URL=${NEXT_PUBLIC_STOREFRONT_URL}
 
 # Same monorepo-nested standalone layout as the storefront image - see that
 # Dockerfile's comment; verified empirically against this same build, not assumed.
@@ -68,4 +82,5 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.PORT||3001,path:'/'},(r)=>process.exit(r.statusCode===200||r.statusCode===307?0:1)).on('error',()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server.js"]

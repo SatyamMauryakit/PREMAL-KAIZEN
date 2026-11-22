@@ -1,0 +1,924 @@
+// POSTGRES PRODUCTION SCHEMA - lives in its own directory (apps/api/prisma-postgres/),
+// a sibling of the real apps/api/prisma/ directory, not a file inside it. This is
+// deliberate, structural isolation: Prisma always resolves a schema's migrations
+// folder as "<the schema file's own directory>/migrations" - every prisma migrate
+// command run with --schema=apps/api/prisma-postgres/schema.prisma reads/writes
+// apps/api/prisma-postgres/migrations/ and nothing else.
+//
+// This is the schema used to build the production Docker image (the deployed
+// premal-api:postgres-* image tags) - it MUST be kept in sync with
+// apps/api/prisma/schema.prisma (the SQLite schema used for local dev) by hand,
+// since Prisma has no cross-provider "same schema, different datasource" feature.
+// Previously lived at apps/api/prisma-postgres-test/ and was gitignored/untracked -
+// promoted here and committed so production's actual database schema is
+// reproducible from source control, not only from one local machine's untracked files.
+//
+// generator output is isolated (./generated-client) so this schema's Prisma Client
+// never collides with the SQLite one generated from apps/api/prisma/schema.prisma.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & CUSTOMERS
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  password      String    // Hashed password (bcrypt)
+
+  // Role-based access: 'customer' or 'admin'
+  role          String    @default("customer")
+
+  // Granular admin role (null for customers). One of: SUPER_ADMIN, PRODUCT_MANAGER,
+  // ORDER_MANAGER, SUPPORT_MANAGER, CONTENT_MANAGER. Only meaningful when role = 'admin';
+  // the binary role field above remains the primary admin/customer gate.
+  adminRole     String?
+
+  // Customer profile
+  firstName     String?
+  lastName      String?
+  phoneNumber   String?
+  phoneVerified DateTime?
+
+  // Account status
+  isActive      Boolean   @default(true)
+  lastLogin     DateTime?
+
+  // Relations
+  addresses     Address[]
+  orders        Order[]
+  wishlist      WishlistItem[]
+  sessions      Session[]
+  reviews       Review[]
+  pendingPhoneChange PendingPhoneChange?
+  pendingEmailChange PendingEmailChange?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([emailVerified])
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String
+  token         String    @unique
+  expiresAt     DateTime
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model VerificationToken {
+  id        String    @id @default(cuid())
+  email     String    // destination identifier: an email address OR a normalized phone number, depending on `type`
+  token     String    @unique
+  type      String    // 'email_verification' | 'password_reset' | 'email_otp' | 'mobile_otp' | 'login_otp' | 'login_mobile_otp' | 'phone_change_otp' | 'email_change_otp'
+  userId    String?   // the account this OTP belongs to, when known at issue time (added for OTP hardening - older rows may be null)
+  expiresAt DateTime
+  attempts  Int       @default(0) // incorrect-code attempts for OTP-type rows; the row is invalidated once this hits the configured max
+
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// One row per (destination, purpose) currently locked out after too many incorrect
+// OTP attempts. A lockout blocks BOTH new sends and new verify attempts for that
+// destination+purpose until `lockedUntil` passes - this closes the brute-force gap
+// where deleting the exhausted token alone would let an attacker immediately request
+// a fresh OTP and get 5 more guesses with no cooldown.
+model OtpLockout {
+  id          String   @id @default(cuid())
+  destination String
+  purpose     String
+  lockedUntil DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([destination, purpose])
+  @@index([lockedUntil])
+}
+
+// Append-only send log used only to enforce "max N OTP sends per hour per
+// destination" - rows are never updated, only counted within a rolling window and
+// pruned once stale. Kept separate from VerificationToken because that table's
+// "one active OTP per destination+purpose" invariant means old rows there get
+// deleted/replaced on every resend, which would make historical counting impossible.
+model OtpSendLog {
+  id          String   @id @default(cuid())
+  destination String
+  purpose     String
+  createdAt   DateTime @default(now())
+
+  @@index([destination, purpose, createdAt])
+}
+
+// A requested-but-not-yet-verified mobile number change for an existing, authenticated
+// user. The live User.phoneNumber/phoneVerified are never touched until the OTP sent to
+// newPhone is verified - this is exactly the "pending change" indirection the mobile
+// number change flow requires. One row per user (a new request overwrites any prior one).
+model PendingPhoneChange {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  newPhone   String
+  expiresAt  DateTime
+  verifiedAt DateTime?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([expiresAt])
+}
+
+// Mirrors PendingPhoneChange for email address changes - the live User.email/
+// emailVerified are never touched until the OTP sent to newEmail is verified.
+model PendingEmailChange {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  newEmail   String
+  expiresAt  DateTime
+  verifiedAt DateTime?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([expiresAt])
+}
+
+model Address {
+  id          String    @id @default(cuid())
+  userId      String
+
+  // Address details
+  label       String    // 'Home', 'Office', etc.
+  firstName   String
+  lastName    String
+  phoneNumber String
+  street1     String    // Street address
+  street2     String?   // Apartment, suite, etc.
+  landmark    String?   // Nearby landmark (optional, common in Indian addresses)
+  city        String
+  state       String    // State or province
+  postalCode  String    // 6-digit PIN code for India
+  country     String
+
+  // Default address for delivery
+  isDefault   Boolean   @default(false)
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([isDefault])
+}
+
+// ============================================================================
+// PRODUCTS & CATALOG (reusable across all services)
+// ============================================================================
+
+model Product {
+  id          String    @id @default(cuid())
+  name        String
+  description String
+  sku         String    @unique
+
+  // Pricing
+  price       Int       // in paise (1 INR = 100 paise)
+  originalPrice Int?
+
+  // Media
+  images      ProductImage[]
+
+  // Categorization
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  // Availability
+  isActive    Boolean   @default(true)
+
+  // Soft delete: a deleted product is never shown to customers or in the normal
+  // admin product list (same as isActive:false), but is kept out of that list
+  // entirely and surfaced in its own "Deleted Products" admin view instead, so a
+  // disabled-vs-deleted product is never ambiguous. Independent of isActive -
+  // restoring a deleted product does not automatically re-activate it.
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+
+  // Variants (stored as JSON-encoded strings - SQLite has no native array/json type)
+  colors      String    @default("[]")
+  sizes       String    @default("[]")
+
+  // Wishlist items
+  wishlistItems WishlistItem[]
+
+  // Cart items
+  cartItems   CartItem[]
+
+  // Reviews (Phase 18)
+  reviews     Review[]
+
+  // Order items
+  orderItems  OrderItem[]
+
+  // Inventory (Phase 12)
+  inventory   Inventory[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([isDeleted])
+  @@index([sku])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  products  Product[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model ProductImage {
+  id        String    @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  order     Int       @default(0)
+
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// ============================================================================
+// CART & WISHLIST
+// ============================================================================
+
+model CartItem {
+  id          String    @id @default(cuid())
+  userId      String?   // Null for guest cart (session-based)
+  productId   String
+  quantity    Int       @default(1)
+  selectedSize String?
+  selectedColor String?
+
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([productId])
+}
+
+model WishlistItem {
+  id        String    @id @default(cuid())
+  userId    String
+  productId String
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
+}
+
+// ============================================================================
+// ORDERS
+// ============================================================================
+
+model Order {
+  id            String    @id @default(cuid())
+  userId        String
+  orderNumber   String    @unique  // e.g., PK-2024-001 (Phase 11 addition)
+
+  // Fulfillment status
+  status        String    @default("pending") // pending, confirmed, processing, packed, shipped, out_for_delivery, delivered, cancelled
+
+  // Payment
+  paymentMethod String    @default("cod") // card, upi, netbanking, cod
+  paymentStatus String    @default("pending") // pending, completed, failed, refunded
+
+  // Razorpay (set only for online-payment orders; always null for COD)
+  razorpayOrderId   String?   @unique
+  razorpayPaymentId String?
+  razorpaySignature String?
+  paymentVerifiedAt DateTime? // set only after server-side signature verification succeeds
+
+  // Notification idempotency - prevents duplicate emails on webhook retries/duplicate callbacks
+  orderEmailSentAt       DateTime?
+  paymentEmailSentAt     DateTime?
+  paymentFailedEmailSentAt DateTime?
+
+  // Pricing
+  subtotal      Int       // in paise (before discount)
+  discount      Int       @default(0) // discount amount in paise (Phase 13)
+  shipping      Int       @default(0)
+  tax           Int       @default(0) // total tax (cgst+sgst, or igst)
+  cgst          Int       @default(0) // in paise - intra-state orders only
+  sgst          Int       @default(0) // in paise - intra-state orders only
+  igst          Int       @default(0) // in paise - inter-state orders only
+  taxRate       Float     @default(0) // GST % applied, frozen at order time so later rate changes don't alter history
+  total         Int       // final amount in paise
+
+  // Promotions (Phase 13)
+  promotionId   String?   // Applied promotion ID
+  couponCode    String?   // Applied coupon code
+
+  // Shipping
+  shippingMethod String   @default("standard") // standard, express, overnight
+  carrier       String?   // e.g., "FedEx", "DHL" (Phase 11 addition)
+  addressId     String?
+  address       Address?  @relation(fields: [addressId], references: [id])
+  trackingNumber String?
+  estimatedDelivery DateTime?
+
+  // Admin notes (Phase 11 addition)
+  notes         String?
+  internalNotes String?   // For admin-only notes
+
+  // Cancellation (customer self-service via POST /api/orders/:id/cancel, or an
+  // admin-initiated status change into 'cancelled') - cancellationReason/Comment are
+  // only ever set by the customer-facing flow (no reason UI exists for admin cancels).
+  cancellationReason  String?
+  cancellationComment String?
+  cancelledAt         DateTime?
+  cancelledBy         String?   // user id who cancelled (customer's own id, or an admin's id)
+
+  // Refund tracking - distinct from the coarser `paymentStatus` above, which still
+  // gets set to "refunded" once a refund actually completes (so existing admin/
+  // analytics filtering on paymentStatus==='refunded' keeps working unchanged).
+  refundStatus  String?   // null, pending, processing, refunded, failed
+  refundId      String?   // Razorpay refund id, once issued
+
+  // Order items
+  items         OrderItem[]
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promotion     Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+  invoice       Invoice?  // one invoice per order (Invoice.orderId is @unique)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([promotionId])
+  @@index([createdAt])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id        String    @id @default(cuid())
+  orderId   String
+  productId String
+
+  quantity  Int
+  price     Int       // Price at time of order (in paise)
+  selectedSize String?
+  selectedColor String?
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  review    Review?
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ============================================================================
+// INVOICES (Phase 17)
+// ============================================================================
+
+// One invoice per order. The `orderId` @unique constraint is the idempotency
+// guarantee - no matter how many times invoice creation is attempted (retries,
+// duplicate webhooks, concurrent calls), at most one Invoice row can exist for a
+// given order. The financial fields are a snapshot copied from the persisted
+// Order at creation time; because OrderItem.price is the price-at-time-of-order and
+// the order's subtotal/discount/shipping/tax/total are never mutated after
+// creation, the invoice total always agrees with the persisted order total and
+// the amount that was actually charged (Razorpay amount is cross-checked against
+// order.total before any online order is marked paid).
+model Invoice {
+  id            String    @id @default(cuid())
+  invoiceNumber String    @unique // e.g., PK-INV-2026-000001
+  orderId       String    @unique // one invoice per order (idempotency guarantee)
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Financial snapshot (all in paise, matching the Order) - copied at creation so
+  // the invoice is a stable, self-contained record independent of any later change.
+  subtotal      Int       // in paise (before discount)
+  discount      Int       @default(0) // in paise
+  shipping      Int       @default(0) // in paise
+  tax           Int       @default(0) // in paise (cgst+sgst, or igst)
+  total         Int       // in paise - must equal order.total
+  currency      String    @default("INR")
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([invoiceNumber])
+  @@index([orderId])
+}
+
+// ============================================================================
+// NOTIFICATIONS — transactional outbox (Phase 17)
+// ============================================================================
+
+// A durable record of every transactional email the system intends to send. An
+// event is created IN THE SAME DATABASE TRANSACTION as the change that caused it
+// (order placed, status changed, payment captured/failed/refunded), so a crash
+// between the commit and email delivery can never lose the notification - the
+// pending event survives and the NotificationProcessor drains and sends it.
+//
+// `idempotencyKey` (`${orderId}:${eventType}`) is @unique, so a retried/duplicate
+// trigger (e.g. Razorpay webhook redelivery) inserts at most one event and can
+// never produce a duplicate email. The processor sends each pending event with
+// retry/backoff, updating `status`/`attempts`/`lastError`/`nextRetryAt`.
+model NotificationEvent {
+  id             String    @id @default(cuid())
+  orderId        String?   // null only for non-order events (none today; allows future use)
+  eventType      String    // order_placed, payment_captured, payment_failed,
+                           // status_confirmed, status_processing, status_packed,
+                           // status_shipped, status_out_for_delivery, status_delivered,
+                           // status_cancelled, status_return_requested,
+                           // status_return_approved, status_return_rejected,
+                           // payment_refunded
+  idempotencyKey String    @unique // `${orderId}:${eventType}` - prevents duplicate events/emails
+  status         String    @default("pending") // pending, processing, sent, failed
+  attempts       Int       @default(0)
+  lastError      String?   // sanitized error message only - never secrets or PII
+  payload        String    // JSON-encoded template data snapshot at enqueue time
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  sentAt         DateTime?
+  nextRetryAt    DateTime?  // when to retry next (exponential backoff); null = immediately due
+
+  @@index([status])
+  @@index([orderId])
+  @@index([nextRetryAt])
+}
+
+// ============================================================================
+// ORDER STATUS AUDIT TRAIL (Phase 17)
+// ============================================================================
+
+// Every fulfillment-status transition is recorded here with who made it and when,
+// so the admin can show a true status history (not one inferred from updatedAt) and
+// the audit survives even if the order itself is later deleted. `changedBy` is the
+// admin user id (null for system-generated transitions, if any are added later).
+model OrderStatusEvent {
+  id          String   @id @default(cuid())
+  orderId     String
+  fromStatus  String
+  toStatus    String
+  changedBy   String?  // admin user id; null for system-generated transitions
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// INVENTORY (Phase 12)
+// ============================================================================
+
+model Inventory {
+  id                String    @id @default(cuid())
+  productId         String
+
+  // Variant details (size/color combination)
+  size              String?   // null for products without sizes
+  color             String?   // null for products without colors
+
+  // Stock levels (all in units)
+  onHand            Int       @default(0)    // Physically recorded stock
+  reserved          Int       @default(0)    // Stock allocated to active orders
+  reorderThreshold  Int       @default(10)   // Low-stock threshold
+
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Audit trail
+  adjustments       InventoryAdjustment[]
+  auditLogs         InventoryAuditLog[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([productId, size, color]) // One inventory record per variant
+  @@index([productId])
+  @@index([onHand])
+}
+
+model InventoryAdjustment {
+  id                String    @id @default(cuid())
+  inventoryId       String
+
+  // Adjustment details
+  type              String    // 'received', 'correction', 'damage', 'manual_reconciliation', 'reserved', 'released'
+  quantity          Int       // Can be positive or negative
+  reason            String    // Required reason for audit trail
+  reference         String?   // Optional reference (PO number, order ID, etc.)
+
+  // Change tracking
+  previousOnHand    Int       // Stock level before adjustment
+  newOnHand         Int       // Stock level after adjustment
+
+  // Admin info
+  adminId           String?   // Admin who made the adjustment
+  notes             String?
+
+  inventory         Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime  @default(now())
+
+  @@index([inventoryId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model InventoryAuditLog {
+  id                String    @id @default(cuid())
+  inventoryId       String
+  adjustmentId      String?   // Reference to adjustment if from adjustment
+
+  // State change
+  previousOnHand    Int
+  newOnHand         Int
+  previousReserved  Int
+  newReserved       Int
+
+  // What changed
+  changeType        String    // 'adjustment', 'reservation', 'release', 'order_placed', 'order_cancelled'
+  reason            String?
+  reference         String?   // e.g., order ID, adjustment ID
+
+  // Who changed it
+  userId            String?   // For customer actions
+  adminId           String?   // For admin actions
+
+  inventory         Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  createdAt         DateTime  @default(now())
+
+  @@index([inventoryId])
+  @@index([changeType])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PROMOTIONS & COUPONS (Phase 13)
+// ============================================================================
+
+model Promotion {
+  id                    String    @id @default(cuid())
+  name                  String    @unique
+  description           String?
+
+  // Promotion type and discount
+  type                  String    // 'percentage', 'fixed_amount', 'free_shipping'
+  value                 Int?      // For percentage: 0-100, For fixed: amount in paise
+  maxDiscount           Int?      // Maximum discount cap in paise (for percentage promos)
+
+  // Eligibility rules
+  minSubtotal           Int?      // Minimum order subtotal in paise
+  firstOrderOnly        Boolean   @default(false)
+
+  // Products & categories (stored as JSON-encoded strings - SQLite has no native array/json type)
+  eligibleProductIds    String    @default("[]") // Empty = all products eligible
+  eligibleCategoryIds   String    @default("[]") // Empty = all categories eligible
+  excludedProductIds    String    @default("[]")
+  excludedCategoryIds   String    @default("[]")
+
+  // Schedule
+  startDate             DateTime?
+  expiryDate            DateTime?
+  isActive              Boolean   @default(false)
+
+  // Usage limits
+  totalUsageLimit       Int?      // Total times this promotion can be used
+  usageCount            Int       @default(0)
+  perCustomerLimit      Int?      // Max times per customer
+
+  // Metadata
+  code                  String?   // For manual coupon-based promotions
+  isArchived            Boolean   @default(false)
+
+  // Relations
+  orders                Order[]
+  coupons               CouponCode[]
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([expiryDate])
+}
+
+model CouponCode {
+  id                String    @id @default(cuid())
+  code              String    @unique // Case-insensitive in application
+  promotionId       String
+
+  // Specific coupon limits (can override promotion limits)
+  usageLimit        Int?      // Total uses for this code
+  usageCount        Int       @default(0)
+  perCustomerLimit  Int?      // Per-customer limit for this code
+
+  // Status
+  isActive          Boolean   @default(true)
+  expiryDate        DateTime?
+
+  // Metadata
+  generatedAt       DateTime  @default(now())
+  description       String?
+
+  // Relations
+  promotion         Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  redemptions       CouponRedemption[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([code])
+  @@index([promotionId])
+  @@index([isActive])
+}
+
+model CouponRedemption {
+  id              String    @id @default(cuid())
+  couponCodeId    String
+  userId          String
+  orderId         String?   // NULL if redemption cancelled/failed
+
+  // Redemption status
+  status          String    @default("completed") // 'completed', 'cancelled', 'refunded'
+  discountAmount  Int       // Amount redeemed in paise
+
+  // Relations
+  couponCode      CouponCode @relation(fields: [couponCodeId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([couponCodeId])
+  @@index([userId])
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// STORE SETTINGS (Phase 16)
+// ============================================================================
+
+model StoreSettings {
+  id                String    @id @default("singleton") // Always use 'singleton' to enforce single record
+
+  // Store Information
+  storeName         String    @default("PREMAL KAIZEN")
+  storeEmail        String    @default("support@premalkaizen.com")
+  storePhone        String    @default("+91-XXX-XXX-XXXX")
+  businessAddress   String    @default("")
+  businessState     String    @default("") // Registered business state - determines CGST+SGST vs IGST on orders
+  gstin             String    @default("") // GSTIN, set by the business admin - never invented by the system
+
+  // Regional Settings
+  timezone          String    @default("Asia/Kolkata")
+  locale            String    @default("en-IN")
+  currency          String    @default("INR")
+
+  // Shipping Configuration (JSON stored as text for flexibility)
+  shippingMethods   String    @default("[]") // JSON array of shipping methods
+
+  // Tax Configuration
+  defaultTaxRate    Float     @default(0)   // Default tax rate as percentage
+  taxCalculationMode String   @default("exclusive") // 'inclusive' or 'exclusive'
+
+  // Checkout Policies
+  guestCheckoutEnabled Boolean @default(true)
+  minimumOrderValue  Int      @default(0)   // Minimum order value in paise
+  maintenanceMode   Boolean  @default(false)
+  maintenanceMessage String   @default("")
+
+  // Notification Preferences
+  orderConfirmationEnabled Boolean @default(true)
+  paymentNotificationsEnabled Boolean @default(true)
+  shippingNotificationsEnabled Boolean @default(true)
+  lowStockNotificationsEnabled Boolean @default(true)
+
+  // Security & Integrations
+  // stripeEnabled is historical/unused - Stripe was never actively integrated (no SDK, no
+  // checkout flow, no webhook). Left in place only so existing rows don't lose the column;
+  // no current code path reads it for gating. Razorpay is the real, active online provider.
+  stripeEnabled     Boolean  @default(false)
+  razorpayEnabled   Boolean  @default(false)
+  codEnabled        Boolean  @default(true) // Cash on Delivery - independent of Razorpay
+  emailNotificationsEnabled Boolean @default(true)
+  smsNotificationsEnabled Boolean @default(false)
+
+  // Audit
+  lastModifiedAt    DateTime  @default(now()) @updatedAt
+  lastModifiedBy    String?   // Admin user ID who made the last change
+
+  @@unique([id]) // Enforce singleton pattern
+}
+
+// ============================================================================
+// PAYMENT WEBHOOKS
+// ============================================================================
+
+// Records every verified Razorpay webhook delivery by its event id, so a retried
+// or duplicate delivery (Razorpay retries on timeout/non-2xx) is detected and
+// skipped instead of re-processing the same payment event twice.
+model PaymentWebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String   @default("razorpay")
+  eventId     String   // Razorpay's x-razorpay-event-id / payload.event + payload id
+  eventType   String   // e.g. 'payment.captured', 'payment.failed'
+  orderId     String?  // Our internal Order.id, once resolved
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([orderId])
+}
+
+model SettingsAuditLog {
+  id                String    @id @default(cuid())
+  setting           String    // Name of the setting that was changed
+  previousValue     String?   // Previous value (JSON string)
+  newValue          String?   // New value (JSON string)
+  changedBy         String    // Admin user ID
+  changeReason      String?   // Reason for the change
+
+  createdAt         DateTime  @default(now())
+
+  @@index([setting])
+  @@index([changedBy])
+  @@index([createdAt])
+}
+
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  actorId    String   // Admin user ID who performed the action
+  actorEmail String   // Denormalized so the log stays readable if the actor is later deleted
+  action     String   // e.g. 'admin.create', 'admin.role_change', 'admin.deactivate', 'admin.activate'
+  targetId   String?  // Affected user/entity ID, if any
+  details    String?  // JSON string with before/after or other relevant context
+  ipAddress  String?
+
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// CONTACT FORM
+// ============================================================================
+
+model ContactMessage {
+  id          String    @id @default(cuid())
+  name        String
+  email       String
+  subject     String
+  category    String    // 'order-status', 'shipping', 'returns', 'product-question', 'payment-issue', 'general'
+  orderNumber String?
+  message     String
+
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// PRODUCT REVIEWS (Phase 18)
+// ============================================================================
+
+// A review is tied to the specific purchased OrderItem, not just (userId, productId) -
+// `orderItemId` is @unique, which is both the DB-level guarantee that a given
+// purchase can only ever be reviewed once (no separate "already reviewed" check can
+// race past this) AND the purchase-verification anchor itself: walking
+// orderItem -> order lets the service confirm the reviewer owns the order, the
+// order was actually delivered, and the product matches - all from data the
+// customer cannot forge, never from a client-supplied userId/productId alone.
+// Re-purchasing the same product is a NEW OrderItem, so a second genuine purchase
+// can still be reviewed separately - this is deliberate, not a loophole.
+model Review {
+  id          String    @id @default(cuid())
+  productId   String
+  userId      String
+  orderItemId String    @unique
+
+  rating      Int       // 1-5
+  title       String
+  description String
+
+  // 'pending' (awaiting moderation), 'approved' (publicly visible, counted in
+  // ratings), 'rejected' (moderated out, never shown or counted)
+  status      String    @default("pending")
+
+  moderatedBy     String?   // admin user id
+  moderatedAt     DateTime?
+  moderationNote  String?
+
+  // Simple inappropriate-content signal (count of "report" clicks) - a full
+  // reports-with-reasons entity would be a separate feature; this is enough for
+  // an admin reviewing the moderation queue to prioritize what to look at first.
+  reportCount Int       @default(0)
+
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([productId, status])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// HOMEPAGE BANNERS (admin-managed storefront banners/offers)
+// ============================================================================
+
+// A single image+text promo block the admin controls end-to-end (image,
+// heading, offer text, badge, button, link, where it appears, display order,
+// on/off, and an optional schedule). The storefront only ever renders
+// `isActive` rows whose schedule (if any) covers "now" - draft/expired/
+// disabled banners never reach customers.
+model HomeBanner {
+  id          String    @id @default(cuid())
+
+  // 'hero' = the big top banner, 'strip' = the row of small dark tiles below
+  // it, 'sidebar' = the stack of small offer cards beside the hero.
+  placement   String
+
+  imageUrl    String
+  // Optional separate crop/image for small viewports - falls back to imageUrl
+  // on the storefront when not set, so existing banners need no backfill.
+  mobileImageUrl String?
+  title       String
+  subtitle    String?
+  // Small overlay label, e.g. "Minimum 40% off" or "Just Launched".
+  badgeText   String?
+  ctaText     String?
+  ctaUrl      String?
+
+  // Per-banner text styling override. textColor is a hex code (e.g. "#FFFFFF");
+  // null falls back to the storefront's default cream text. fontStyle picks
+  // between the site's two existing type families ('display' or 'sans') -
+  // never a new font, per the brand's typography constraint.
+  textColor   String?
+  fontStyle   String?
+
+  order       Int       @default(0)
+  isActive    Boolean   @default(true)
+  startAt     DateTime?
+  endAt       DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([placement, isActive])
+  @@index([order])
+}

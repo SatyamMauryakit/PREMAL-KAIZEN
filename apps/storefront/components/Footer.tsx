@@ -30,7 +30,7 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* Main Footer Content */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12 mb-12">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-8 md:gap-12 mb-12">
           {/* Brand Column */}
           <div>
             <Link href="/" className="inline-flex items-center mb-4 hover:opacity-80 transition-opacity">
@@ -69,9 +69,12 @@ export const Footer: React.FC = () => {
             <ul className="space-y-3 text-sm">
               {[
                 { label: 'Contact Us', href: '/contact' },
+                { label: 'Cancellation Policy', href: '/cancellation-policy' },
+                { label: 'Shipping & Delivery', href: '/shipping-policy' },
+                { label: 'Returns & Exchanges', href: '/return-exchange-policy' },
+                { label: 'Refund Policy', href: '/refund-policy' },
                 { label: 'Track Order', href: '/orders' },
                 { label: 'FAQ', href: '/faq' },
-                { label: 'Shipping', href: '/shipping' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link href={link.href} className="text-gray-light hover:text-cream transition-colors">
@@ -123,6 +126,22 @@ export const Footer: React.FC = () => {
                   Instagram
                 </a>
               </li>
+            </ul>
+          </div>
+          {/* Legal */}
+          <div>
+            <h4 className="text-xs font-bold mb-4 tracking-widest uppercase text-cream">Legal</h4>
+            <ul className="space-y-3 text-sm">
+              {[
+                { label: 'Privacy Policy', href: '/privacy-policy' },
+                { label: 'Terms & Conditions', href: '/terms-conditions' },
+              ].map((link) => (
+                <li key={link.href}>
+                  <Link href={link.href} className="text-gray-light hover:text-cream transition-colors">
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
             </ul>
           </div>
         </div>

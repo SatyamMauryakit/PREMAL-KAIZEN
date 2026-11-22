@@ -1,0 +1,64 @@
+# Admin panel - note it has NO publicly-reachable Service of its own and is
+# deliberately excluded from 08-caddy.yaml's routing (matching deploy-compose's own
+# Caddyfile, which reverse-proxies only storefront+api). Reach it via
+# `kubectl port-forward svc/premal-admin 3001:3001 -n premal-kaizen` or a separate,
+# IP-restricted ingress rule added later - never expose it the same way as the
+# public storefront/API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premal-admin
+  namespace: premal-kaizen
+  labels:
+    app.kubernetes.io/name: premal-admin
+    app.kubernetes.io/part-of: premal-kaizen
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app: premal-admin }
+  template:
+    metadata:
+      labels: { app: premal-admin }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: admin
+          image: premal-admin:postgres-local # override per environment/CI
+          ports:
+            - containerPort: 3001
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: 400m, memory: 384Mi }
+          # httpGet probes treat any 200-399 status as Success by default, so the
+          # admin root's 307 redirect-when-unauthenticated needs no special-casing here.
+          livenessProbe:
+            httpGet: { path: /, port: 3001 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: { path: /, port: 3001 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet: { path: /, port: 3001 }
+            failureThreshold: 20
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-admin
+  namespace: premal-kaizen
+spec:
+  selector: { app: premal-admin }
+  ports:
+    - port: 3001
+      targetPort: 3001

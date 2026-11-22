@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, Res, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, Res, BadRequestException, NotFoundException, UseGuards, HttpCode } from '@nestjs/common';
 import { Response } from 'express';
 import { OrdersService } from './orders.service';
 import { InvoicesService } from '../invoices/invoices.service';
@@ -7,6 +7,12 @@ import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { PermissionGuard } from '../common/rbac/permission.guard';
 import { RequirePermission } from '../common/rbac/require-permission.decorator';
+import { CancelOrderDto } from './dto/cancel-order.dto';
+import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { UpdateOrderPaymentStatusDto } from './dto/update-order-payment-status.dto';
+import { UpdateShippingDto } from './dto/update-shipping.dto';
+import { UpdateOrderNotesDto } from './dto/update-order-notes.dto';
 
 @Controller('api/orders')
 export class OrdersController {
@@ -48,44 +54,46 @@ export class OrdersController {
   // comes from the verified session, never from the request body.
   @UseGuards(AuthGuard)
   @Post()
-  async create(@Body() createOrderDto: any, @Req() req: any) {
+  async create(@Body() createOrderDto: CreateOrderDto, @Req() req: any) {
     return this.ordersService.create(req.user.id, createOrderDto);
+  }
+
+  // Customer self-service cancellation - any logged-in customer may cancel their own
+  // order; ownership and eligibility (not yet shipped) are enforced inside the service,
+  // which returns 403/404/409 as appropriate. Deliberately not admin-gated: this is the
+  // customer-facing counterpart to the admin-only status route below.
+  @UseGuards(AuthGuard)
+  @HttpCode(200)
+  @Post(':id/cancel')
+  async cancel(@Param('id') id: string, @Body() dto: CancelOrderDto, @Req() req: any) {
+    return this.ordersService.cancelByCustomer(id, req.user.id, dto.reason, dto.comment);
   }
 
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('orders:process')
   @Put(':id/status')
-  async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: any) {
-    if (!body.status) {
-      throw new BadRequestException('Status is required');
-    }
+  async updateStatus(@Param('id') id: string, @Body() body: UpdateOrderStatusDto, @Req() req: any) {
     return this.ordersService.updateStatus(id, body.status, req.user.id);
   }
 
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('orders:process')
   @Put(':id/payment-status')
-  async updatePaymentStatus(@Param('id') id: string, @Body() body: any, @Req() req: any) {
-    if (!body.paymentStatus) {
-      throw new BadRequestException('Payment status is required');
-    }
+  async updatePaymentStatus(@Param('id') id: string, @Body() body: UpdateOrderPaymentStatusDto, @Req() req: any) {
     return this.ordersService.updatePaymentStatus(id, body.paymentStatus, req.user.id);
   }
 
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('orders:process')
   @Put(':id/shipping')
-  async updateShipping(@Param('id') id: string, @Body() body: any) {
+  async updateShipping(@Param('id') id: string, @Body() body: UpdateShippingDto) {
     return this.ordersService.updateShipping(id, body);
   }
 
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('orders:process')
   @Put(':id/notes')
-  async addNotes(@Param('id') id: string, @Body() body: any) {
-    if (!body.notes && body.notes !== '') {
-      throw new BadRequestException('Notes are required');
-    }
+  async addNotes(@Param('id') id: string, @Body() body: UpdateOrderNotesDto) {
     return this.ordersService.addNotes(id, body.notes);
   }
 

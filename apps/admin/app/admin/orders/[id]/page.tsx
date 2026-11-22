@@ -7,6 +7,20 @@ import { adminOrdersService, Order } from '@/lib/orders-service';
 
 const STATUS_OPTIONS = ['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 const PAYMENT_STATUS_OPTIONS = ['pending', 'completed', 'failed', 'refunded'];
+const CANCELLATION_REASON_LABELS: Record<string, string> = {
+  mistake: 'Ordered by mistake',
+  better_product: 'Found a better product',
+  changed_mind: 'Changed my mind',
+  wrong_size: 'Incorrect size or product',
+  delivery_too_long: 'Delivery taking too long',
+  other: 'Other reason',
+};
+const REFUND_STATUS_BADGE: Record<string, { label: string; color: string }> = {
+  pending: { label: 'Refund Pending', color: 'bg-amber-100 text-amber-700' },
+  processing: { label: 'Refund Pending', color: 'bg-amber-100 text-amber-700' },
+  refunded: { label: 'Refunded', color: 'bg-blue-100 text-blue-700' },
+  failed: { label: 'Refund Failed', color: 'bg-red-100 text-red-700' },
+};
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -380,12 +394,17 @@ export default function OrderDetailsPage({ params }: PageProps) {
             {/* Payment Status */}
             <div className="bg-white rounded-lg border border-gray-light p-6">
               <h3 className="text-sm font-semibold text-black mb-3">Payment Status</h3>
-              <div className="mb-4 flex items-center gap-2">
+              <div className="mb-4 flex items-center gap-2 flex-wrap">
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                   order.paymentStatus === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
                 }`}>
                   {formatStatus(order.paymentStatus)}
                 </span>
+                {order.refundStatus && REFUND_STATUS_BADGE[order.refundStatus] && (
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${REFUND_STATUS_BADGE[order.refundStatus].color}`}>
+                    {REFUND_STATUS_BADGE[order.refundStatus].label}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-gray-medium mb-3">
                 <span className="font-medium text-black">Method:</span> {formatStatus(order.paymentMethod)}
@@ -410,6 +429,46 @@ export default function OrderDetailsPage({ params }: PageProps) {
                 ⚠️ Changing payment status does not process refunds or charges. Update this only to reflect actual payment state.
               </div>
             </div>
+
+            {/* Cancellation & Refund - read-only, no admin action here (refunds are
+                triggered automatically on cancellation; this panel is visibility-only) */}
+            {order.status === 'cancelled' && (
+              <div className="bg-white rounded-lg border border-gray-light p-6">
+                <h3 className="text-sm font-semibold text-black mb-3">Cancellation &amp; Refund</h3>
+                <div className="space-y-2 text-xs">
+                  {order.cancelledAt && (
+                    <p className="text-gray-dark">
+                      <span className="font-medium text-black">Cancelled on:</span> {new Date(order.cancelledAt).toLocaleString('en-IN')}
+                    </p>
+                  )}
+                  {order.cancellationReason && (
+                    <p className="text-gray-dark">
+                      <span className="font-medium text-black">Reason:</span> {CANCELLATION_REASON_LABELS[order.cancellationReason] || order.cancellationReason}
+                    </p>
+                  )}
+                  {order.cancellationComment && (
+                    <p className="text-gray-dark">
+                      <span className="font-medium text-black">Comment:</span> {order.cancellationComment}
+                    </p>
+                  )}
+                  {order.refundStatus && REFUND_STATUS_BADGE[order.refundStatus] && (
+                    <div className="pt-2">
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${REFUND_STATUS_BADGE[order.refundStatus].color}`}>
+                        {REFUND_STATUS_BADGE[order.refundStatus].label}
+                      </span>
+                    </div>
+                  )}
+                  {order.refundId && (
+                    <p className="text-gray-dark">
+                      <span className="font-medium text-black">Refund ID:</span> {order.refundId}
+                    </p>
+                  )}
+                  {!order.cancellationReason && !order.refundStatus && (
+                    <p className="text-gray-medium">Cancelled by an admin via fulfillment status - no customer reason on file.</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Order Info */}
             <div className="bg-white rounded-lg border border-gray-light p-6">

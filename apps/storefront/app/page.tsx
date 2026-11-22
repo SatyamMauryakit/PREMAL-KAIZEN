@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { HeroSection } from '@/components/HeroSection';
+import { HomeBanners } from '@/components/banners/HomeBanners';
 import { ProductsSection } from '@/components/ProductsSection';
 import { RecentlyViewedProducts } from '@/components/RecentlyViewedProducts';
 import { buildStaticMetadata } from '@/lib/metadata';
@@ -13,8 +13,8 @@ export const metadata: Metadata = buildStaticMetadata({
 export default function Home() {
   return (
     <>
-      {/* Hero Section */}
-      <HeroSection />
+      {/* Admin-managed hero/strip/sidebar banners - see Admin > Homepage Banners */}
+      <HomeBanners />
 
       {/* Featured Products Section */}
       <ProductsSection />

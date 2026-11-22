@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { label: 'Customer Carts', href: '/admin/carts', icon: Icons.Carts, permission: 'customers:view' },
   { label: 'Enquiries', href: '/admin/enquiries', icon: Icons.Messages, permission: 'enquiries:view' },
   { label: 'Reviews', href: '/admin/reviews', icon: Icons.Reviews, permission: 'reviews:moderate' },
+  { label: 'Homepage Banners', href: '/admin/banners', icon: Icons.Messages, permission: 'content:manage' },
   { label: 'Analytics', href: '/admin/analytics', icon: Icons.Analytics, permission: 'analytics:view' },
   { label: 'Settings', href: '/admin/settings', icon: Icons.Settings, permission: 'settings:view' },
 ];

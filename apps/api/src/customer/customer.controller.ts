@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CustomerService } from './customer.service';
 import { CartService } from './cart.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import { CreateAddressDto, UpdateAddressDto } from './dto/address.dto';
 
 /**
  * CustomerController
@@ -112,7 +113,7 @@ export class CustomerController {
    * Create new address
    */
   @Post('addresses')
-  async createAddress(@Request() req: any, @Body() body: any) {
+  async createAddress(@Request() req: any, @Body() body: CreateAddressDto) {
     const userId = this.extractUserId(req);
     return this.customerService.createAddress(userId, body);
   }
@@ -122,7 +123,7 @@ export class CustomerController {
    * Update address
    */
   @Put('addresses/:id')
-  async updateAddress(@Request() req: any, @Param('id') addressId: string, @Body() body: any) {
+  async updateAddress(@Request() req: any, @Param('id') addressId: string, @Body() body: UpdateAddressDto) {
     const userId = this.extractUserId(req);
     return this.customerService.updateAddress(userId, addressId, body);
   }

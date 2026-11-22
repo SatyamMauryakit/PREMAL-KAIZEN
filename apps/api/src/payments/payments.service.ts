@@ -123,9 +123,13 @@ export class PaymentsService {
 
     const eventType: string = payload.event || 'unknown';
     const paymentEntity = payload.payload?.payment?.entity;
-    // Razorpay re-delivers the identical payload on retry, so (eventType + payment id)
+    // Refund webhooks carry a 'refund' entity instead of 'payment' - no order_id on it,
+    // so the order is resolved below via razorpayPaymentId instead of razorpayOrderId.
+    const refundEntity = payload.payload?.refund?.entity;
+    const entity = paymentEntity || refundEntity;
+    // Razorpay re-delivers the identical payload on retry, so (eventType + entity id)
     // is a stable dedupe key across retries of the same event.
-    const eventId: string = paymentEntity?.id ? `${eventType}:${paymentEntity.id}` : `${eventType}:${payload.created_at || Date.now()}`;
+    const eventId: string = entity?.id ? `${eventType}:${entity.id}` : `${eventType}:${payload.created_at || Date.now()}`;
 
     const alreadyProcessed = await this.prisma.paymentWebhookEvent.findUnique({
       where: { provider_eventId: { provider: 'razorpay', eventId } },
@@ -134,20 +138,22 @@ export class PaymentsService {
       return { status: 'duplicate_ignored' };
     }
 
-    if (!paymentEntity) {
+    if (!entity) {
       await this.prisma.paymentWebhookEvent.create({ data: { provider: 'razorpay', eventId, eventType, orderId: null } });
       return { status: 'ignored_unhandled_event_type' };
     }
 
-    const razorpayOrderId: string | undefined = paymentEntity.order_id;
-    const order = razorpayOrderId ? await this.prisma.order.findUnique({ where: { razorpayOrderId } }) : null;
+    const order = paymentEntity
+      ? (paymentEntity.order_id ? await this.prisma.order.findUnique({ where: { razorpayOrderId: paymentEntity.order_id } }) : null)
+      : (refundEntity?.payment_id ? await this.prisma.order.findFirst({ where: { razorpayPaymentId: refundEntity.payment_id } }) : null);
 
     await this.prisma.paymentWebhookEvent.create({
       data: { provider: 'razorpay', eventId, eventType, orderId: order?.id || null },
     });
 
     if (!order) {
-      this.logger.warn(`Webhook ${eventType} references unknown razorpayOrderId=${razorpayOrderId}`);
+      const lookupKey = paymentEntity ? `razorpayOrderId=${paymentEntity.order_id}` : `razorpayPaymentId=${refundEntity?.payment_id}`;
+      this.logger.warn(`Webhook ${eventType} references unknown order (${lookupKey})`);
       return { status: 'order_not_found' };
     }
 
@@ -196,6 +202,31 @@ export class PaymentsService {
             await this.notificationService.enqueue(order.id, 'payment_failed', eventPayload, { tx });
           }
         });
+      }
+    } else if (eventType === 'refund.processed') {
+      // Authoritative confirmation for a non-instant refund that settled after
+      // attemptRefund()'s synchronous API call already returned 'pending'/'processing'.
+      // Conditional update means a refund already marked 'refunded' (e.g. by that same
+      // synchronous call, if it was instant) is left untouched - no double notification.
+      if (order.refundStatus !== 'refunded' && refundEntity) {
+        const full = await this.prisma.order.findUnique({
+          where: { id: order.id },
+          include: { items: { include: { product: true } }, address: true, user: true },
+        });
+        await this.prisma.$transaction(async (tx) => {
+          const r = await tx.order.updateMany({
+            where: { id: order.id, refundStatus: { not: 'refunded' } },
+            data: { refundStatus: 'refunded', refundId: refundEntity.id, paymentStatus: 'refunded' },
+          });
+          if (r.count > 0 && full) {
+            const eventPayload = buildOrderPayload({ ...full, refundId: refundEntity.id });
+            await this.notificationService.enqueue(order.id, 'payment_refunded', eventPayload, { tx });
+          }
+        });
+      }
+    } else if (eventType === 'refund.failed') {
+      if (order.refundStatus !== 'failed') {
+        await this.prisma.order.update({ where: { id: order.id }, data: { refundStatus: 'failed' } });
       }
     }
 

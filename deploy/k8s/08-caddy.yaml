@@ -1,0 +1,78 @@
+# Caddy reverse proxy / ingress - kept as Caddy (not K3s's bundled Traefik) to stay
+# consistent with the already-established deploy-compose/Caddyfile, just with
+# 127.0.0.1:PORT targets swapped for the real K8s Service DNS names (no host
+# networking inside a cluster). Admin is deliberately NOT routed here, matching
+# deploy-compose/Caddyfile's own documented posture.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: premal-caddy-config
+  namespace: premal-kaizen
+data:
+  Caddyfile: |
+    :80 {
+        handle /api/* {
+            reverse_proxy premal-api:3002
+        }
+        handle {
+            reverse_proxy premal-storefront:3000
+        }
+        encode gzip
+        log {
+            output file /data/caddy-access.log
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premal-caddy
+  namespace: premal-kaizen
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: premal-caddy }
+  template:
+    metadata:
+      labels: { app: premal-caddy }
+    spec:
+      containers:
+        - name: caddy
+          image: caddy:2-alpine
+          ports:
+            - containerPort: 80
+            - containerPort: 443
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+            - name: caddy-data
+              mountPath: /data
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+      volumes:
+        - name: caddyfile
+          configMap: { name: premal-caddy-config }
+        - name: caddy-data
+          emptyDir: {} # access log + any future ACME cert cache - not customer data, fine to lose on pod recreate
+---
+# type: LoadBalancer - K3s ships its own lightweight "ServiceLB" (Klipper) controller
+# that satisfies this on a single node by binding the host's own IP, no cloud
+# load balancer or extra cost involved. Falls back to NodePort behavior if ServiceLB
+# is disabled on a given K3s install.
+apiVersion: v1
+kind: Service
+metadata:
+  name: premal-caddy
+  namespace: premal-kaizen
+spec:
+  type: LoadBalancer
+  selector: { app: premal-caddy }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+    - name: https
+      port: 443
+      targetPort: 443

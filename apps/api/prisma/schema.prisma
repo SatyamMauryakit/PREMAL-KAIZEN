@@ -361,6 +361,20 @@ model Order {
   notes         String?
   internalNotes String?   // For admin-only notes
 
+  // Cancellation (customer self-service via POST /api/orders/:id/cancel, or an
+  // admin-initiated status change into 'cancelled') - cancellationReason/Comment are
+  // only ever set by the customer-facing flow (no reason UI exists for admin cancels).
+  cancellationReason  String?
+  cancellationComment String?
+  cancelledAt         DateTime?
+  cancelledBy         String?   // user id who cancelled (customer's own id, or an admin's id)
+
+  // Refund tracking - distinct from the coarser `paymentStatus` above, which still
+  // gets set to "refunded" once a refund actually completes (so existing admin/
+  // analytics filtering on paymentStatus==='refunded' keeps working unchanged).
+  refundStatus  String?   // null, pending, processing, refunded, failed
+  refundId      String?   // Razorpay refund id, once issued
+
   // Order items
   items         OrderItem[]
 
@@ -854,4 +868,50 @@ model Review {
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+}
+
+// ============================================================================
+// HOMEPAGE BANNERS (admin-managed storefront banners/offers)
+// ============================================================================
+
+// A single image+text promo block the admin controls end-to-end (image,
+// heading, offer text, badge, button, link, where it appears, display order,
+// on/off, and an optional schedule). The storefront only ever renders
+// `isActive` rows whose schedule (if any) covers "now" - draft/expired/
+// disabled banners never reach customers.
+model HomeBanner {
+  id          String    @id @default(cuid())
+
+  // 'hero' = the big top banner, 'strip' = the row of small dark tiles below
+  // it, 'sidebar' = the stack of small offer cards beside the hero.
+  placement   String
+
+  imageUrl    String
+  // Optional separate crop/image for small viewports - falls back to imageUrl
+  // on the storefront when not set, so existing banners need no backfill.
+  mobileImageUrl String?
+  title       String
+  subtitle    String?
+  // Small overlay label, e.g. "Minimum 40% off" or "Just Launched".
+  badgeText   String?
+  ctaText     String?
+  ctaUrl      String?
+
+  // Per-banner text styling override. textColor is a hex code (e.g. "#FFFFFF");
+  // null falls back to the storefront's default cream text. fontStyle picks
+  // between the site's two existing type families ('display' or 'sans') -
+  // never a new font, per the brand's typography constraint.
+  textColor   String?
+  fontStyle   String?
+
+  order       Int       @default(0)
+  isActive    Boolean   @default(true)
+  startAt     DateTime?
+  endAt       DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([placement, isActive])
+  @@index([order])
 }

@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Query, Body, Req, UseGuards } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { PermissionGuard } from '../common/rbac/permission.guard';
 import { RequirePermission } from '../common/rbac/require-permission.decorator';
+import { CreatePromotionDto, UpdatePromotionDto } from './dto/create-promotion.dto';
+import { ToggleActiveDto, CreateCouponCodesDto, ValidateCouponDto, RedeemCouponDto, ReleaseCouponDto } from './dto/promotion-actions.dto';
 
 @Controller('api/promotions')
 export class PromotionsController {
@@ -39,17 +41,14 @@ export class PromotionsController {
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('promotions:manage')
   @Post()
-  async create(@Body() body: any) {
-    if (!body.name || !body.type) {
-      throw new BadRequestException('name and type are required');
-    }
+  async create(@Body() body: CreatePromotionDto) {
     return this.promotionsService.create(body);
   }
 
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('promotions:manage')
   @Put(':id')
-  async update(@Param('id') id: string, @Body() body: any) {
+  async update(@Param('id') id: string, @Body() body: UpdatePromotionDto) {
     return this.promotionsService.update(id, body);
   }
 
@@ -63,10 +62,7 @@ export class PromotionsController {
   @UseGuards(AuthGuard, AdminGuard, PermissionGuard)
   @RequirePermission('promotions:manage')
   @Put(':id/toggle')
-  async toggleActive(@Param('id') id: string, @Body() body: any) {
-    if (body.isActive === undefined) {
-      throw new BadRequestException('isActive is required');
-    }
+  async toggleActive(@Param('id') id: string, @Body() body: ToggleActiveDto) {
     return this.promotionsService.toggleActive(id, body.isActive);
   }
 
@@ -75,7 +71,7 @@ export class PromotionsController {
   @Post(':id/coupons')
   async createCouponCodes(
     @Param('id') promotionId: string,
-    @Body() body: any
+    @Body() body: CreateCouponCodesDto
   ) {
     const count = body.count || 1;
     return this.promotionsService.createCouponCodes(promotionId, count, {
@@ -95,16 +91,12 @@ export class PromotionsController {
   // preview, it never redeems/mutates anything (see redeemCoupon/redeemCouponInTx
   // below, which do mutate and are properly guarded).
   @Post('validate-coupon')
-  async validateCoupon(@Body() body: any) {
-    if (!body.couponCode || !body.userId || !body.cartItems || !body.subtotal) {
-      throw new BadRequestException('couponCode, userId, cartItems, and subtotal are required');
-    }
-
+  async validateCoupon(@Body() body: ValidateCouponDto) {
     return this.promotionsService.validateAndApplyCoupon(
       body.couponCode,
       body.userId,
       body.cartItems,
-      parseInt(body.subtotal)
+      body.subtotal
     );
   }
 
@@ -116,16 +108,12 @@ export class PromotionsController {
   // own session id, consistent with every other mutating endpoint in this API.
   @UseGuards(AuthGuard)
   @Post(':id/redeem')
-  async redeemCoupon(@Param('id') promotionId: string, @Body() body: any, @Req() req: any) {
-    if (!body.couponCode || !body.orderId || body.discountAmount === undefined) {
-      throw new BadRequestException('couponCode, orderId, and discountAmount are required');
-    }
-
+  async redeemCoupon(@Param('id') promotionId: string, @Body() body: RedeemCouponDto, @Req() req: any) {
     return this.promotionsService.redeemCoupon(
       body.couponCode,
       req.user.id,
       body.orderId,
-      parseInt(body.discountAmount)
+      body.discountAmount
     );
   }
 
@@ -133,11 +121,7 @@ export class PromotionsController {
   // real client.
   @UseGuards(AuthGuard)
   @Post(':id/release')
-  async releaseCoupon(@Param('id') promotionId: string, @Body() body: any, @Req() req: any) {
-    if (!body.couponCode || !body.orderId) {
-      throw new BadRequestException('couponCode and orderId are required');
-    }
-
+  async releaseCoupon(@Param('id') promotionId: string, @Body() body: ReleaseCouponDto, @Req() req: any) {
     await this.promotionsService.releaseRedemption(body.couponCode, req.user.id, body.orderId);
     return { success: true };
   }

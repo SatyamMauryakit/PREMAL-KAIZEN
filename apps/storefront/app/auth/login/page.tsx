@@ -20,7 +20,9 @@ function LoginForm() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [clearSignal, setClearSignal] = useState(0);
 
-  const redirectTo = searchParams.get('redirect') || '/account';
+  // Land on the homepage (banners + products) after a plain login; a `redirect` param
+  // still wins when login was prompted mid-flow (e.g. from checkout).
+  const redirectTo = searchParams.get('redirect') || '/';
 
   // Countdown timer for resend cooldown
   useEffect(() => {
