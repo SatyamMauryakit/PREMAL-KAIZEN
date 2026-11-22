@@ -282,6 +282,18 @@ aws s3 sync s3://<OLD_BUCKET>/products/ s3://premal-kaizen-v2-<ACCOUNT_ID>/produ
 
 then rewrite the URLs in the database (see section 6).
 
+### 7.4a Using a second bucket
+
+Images can come from any number of buckets for **display**: the database stores the full image URL, and
+`apps/storefront/next.config.ts` allows `https://*.s3.ap-south-1.amazonaws.com/products/**` for `next/image`
+(banners). So an image from another bucket works as long as the object is under `products/` and that bucket's
+policy allows public `s3:GetObject` on `products/*` (the previous deployment's bucket does).
+
+**Uploads** go to exactly one bucket at a time, chosen by `S3_BUCKET` in `.env`. Writing to two buckets at
+once would need an application change. To switch the upload bucket: allow `s3:PutObject` on
+`arn:aws:s3:::<bucket>/products/*` in the EC2 role's inline policy, set `S3_BUCKET=<bucket>`, then
+`docker compose up -d --force-recreate api`. Keep database backups in a bucket the role can write to under `backups/`.
+
 ### 7.5 Useful commands
 
 ```bash
